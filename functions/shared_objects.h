@@ -2,12 +2,9 @@ class Body{
 public:
   int x;
   Body(int val){
-    ptr = std::make_unique<int>(val);
-    x = *ptr;
+    x = val;
   }
   ~Body(){
-    std::cout << "Freeing Body ptr in destructor for pointer at " << ptr << std::endl;
+    std::cout << "Freeing Body in destructor" << std::endl;
   }
-private:
-  std::unique_ptr<int> ptr;
 };

@@ -108,9 +108,9 @@ void register_and_schedule()
 
 void hardcoded_test()
 {
-  // parse_and_load((char *)"print_input");
-  // parse_and_load((char *)"print_input");
-  // parse_and_load((char *)"access_cowns");
+  parse_and_load((char *)"print_input");
+  parse_and_load((char *)"print_input");
+  parse_and_load((char *)"access_cowns");
   parse_and_load((char *)"access_cowns");
 }
 
