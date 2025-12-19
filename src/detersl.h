@@ -16,17 +16,17 @@ namespace detersl {
     }
 
     template<class T>
-    void make_resource(const std::string &name, T& value)
+    void set_resource(const std::string &name, T& value)
     {
-        return worker::cur_runner->make_resource<T>(name, value);
+        return worker::cur_runner->set_resource<T>(name, value);
     }
 
     // Overload for rvalue references
     template<class T>
-    void make_resource(const std::string &name, T&& value)
+    void set_resource(const std::string &name, T&& value)
     {
         T temp = std::move(value);
-        return worker::cur_runner->make_resource<T>(name, temp);
+        return worker::cur_runner->set_resource<T>(name, temp);
     }
 
     template<class T>

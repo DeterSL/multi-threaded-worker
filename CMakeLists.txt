@@ -3,6 +3,11 @@ project(detersl-worker)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(APPLE)
+    set(CMAKE_BUILD_RPATH "/opt/homebrew/lib")
+    set(CMAKE_INSTALL_RPATH "/opt/homebrew/lib")
+endif()
+
 include(FetchContent)
 
 find_package(nlohmann_json QUIET)
@@ -37,15 +42,39 @@ target_compile_definitions(detersl_common INTERFACE
 # ------------------------------------------------------------
 # Executable
 # ------------------------------------------------------------
-add_executable(detersl-worker 
-    src/main.cpp
+
+add_library(detersl_worker_core STATIC
     src/runner.cpp
+    src/scheduling.cpp
 )
 
-target_link_libraries(detersl-worker PRIVATE
+target_link_libraries(detersl_worker_core PUBLIC
     detersl_common
     nlohmann_json::nlohmann_json
 )
+
+target_include_directories(detersl_worker_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+add_executable(detersl-worker 
+    src/main.cpp
+)
+
+target_link_libraries(detersl-worker PRIVATE
+    detersl_worker_core
+)
+
+# add_executable(detersl-worker 
+#     src/main.cpp
+#     src/runner.cpp
+#     src/scheduling.cpp
+# )
+
+# target_link_libraries(detersl-worker PRIVATE
+#     detersl_common
+#     nlohmann_json::nlohmann_json
+# )
 
 # ------------------------------------------------------------
 # Shared plugin

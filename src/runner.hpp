@@ -18,7 +18,7 @@ namespace detersl::worker {
             }
 
             template<class T>
-            void make_resource(const std::string &name, T& value)
+            void set_resource(const std::string &name, T& value)
             {
                 if(local_resources.find(name) == local_resources.end()) {
                     return;

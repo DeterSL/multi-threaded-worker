@@ -10,7 +10,7 @@ using namespace detersl;
 extern "C" int func(std::string input)
 {
   Body b{5};
-  make_resource<Body>("res3", b);
+  set_resource<Body>("res3", b);
 
   std::cout << "res3 is " << get_resource<Body>("res3").x << std::endl;
 
