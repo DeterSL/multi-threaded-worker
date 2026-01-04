@@ -9,15 +9,17 @@ using namespace detersl;
 
 extern "C" int func(std::string input)
 {
-  set_resource<int>("res1", 8);
-  set_resource<std::string>("res2", std::string("Hello World!"));
 
-  // std::cout << "res1 is " << get_resource<int>("res1") << " and res2 is " <<
-  // get_resource<std::string>("res2") << std::endl;
+  set_resource("res1", {8});
+  std::vector<uint8_t> res2_data = {1,2,4};
+  set_resource("res2", std::move(res2_data));
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+  // std::cout << "res1 is " << static_cast<int>(get_resource("res1")[0]) << " and res2 is " <<
+  // get_resource("res2")[0] << std::endl;
 
-  std::cout << "slept for 5 seconds" <<std::endl;
+  // std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+
+  // std::cout << "slept for 5 seconds" <<std::endl;
 
   return 0;
 }

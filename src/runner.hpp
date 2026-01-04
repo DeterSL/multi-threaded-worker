@@ -2,51 +2,92 @@
 #include <unordered_map>
 #include "models.hpp"
 #include <verona.h>
+#include <vector>
 #include <cpp/when.h>
 
 using namespace verona::rt;
 using namespace verona::cpp;
 
 namespace detersl::worker {
-    class Runner {
+    class RunnerInterface {
+
         public:
-            Runner(acquired_cown_span<Resource> cown_arr, const FunctionState func_state_);
+
+            RunnerInterface() = default;
+
+            virtual std::vector<uint8_t> get_resource(std::string key) = 0;
+
+            virtual void set_resource(std::string key, std::vector<uint8_t> &&data) = 0;
+
+            virtual void delete_resource(std::string key) = 0;
+
+            virtual int run_function(int(*func)(std::string)) = 0;
+
+            virtual ~RunnerInterface() = default;
+
+    };
+
+    inline thread_local RunnerInterface* cur_runner = nullptr;
+
+    class CPPRunner : public RunnerInterface {
+        public:
+            CPPRunner(acquired_cown_span<Resource> cown_arr, const FunctionState func_state_): func_state(func_state_){
+                for(size_t i = 0; i < func_state.resources.size(); i++){
+                    local_resources[func_state.resources[i]] = &(*cown_arr.array[i]);
+                }
+                cur_runner = this;
+            }   
  
-            template<typename T>
-            T& get_resource(const std::string& name) {
-                return local_resources.at(name)->template get_data<T>();
+            std::vector<uint8_t> get_resource(std::string key) override {
+                return local_resources.at(key)->get_data();
             }
 
-            template<class T>
-            void set_resource(const std::string &name, T& value)
+            void set_resource(std::string key, std::vector<uint8_t> &&data) override
             {
-                if(local_resources.find(name) == local_resources.end()) {
+                if(local_resources.find(key) == local_resources.end()) {
                     return;
                 }
-                T* stored = new T(value);
-                local_resources[name]->set_data(reinterpret_cast<void*>(stored));
+                local_resources[key]->set_data(std::move(data));
             }
 
-            template<class T>
-            void delete_resource(const std::string &name)
+            void delete_resource(std::string key) override
             {
-                if(local_resources.find(name) == local_resources.end()) {
+                if(local_resources.find(key) == local_resources.end()) {
                     return;
                 }
-                local_resources[name]->template free_data<T>();
-                local_resources.erase(name);
+                local_resources[key]->free_data();
+                local_resources.erase(key);
             }
             
-            int run_function(int(*func)(std::string));
+            int run_function(int(*func)(std::string)) override {
+                std::cout << "Running " << func_state.name << " from thread : " << std::this_thread::get_id() << "\n";
 
-            std::vector<std::string> get_deleted_resources();
+                json input_json = func_state;
+                try{
+                    func(input_json.dump());
+                } catch(const std::exception& e){
+                    std::cerr << "Function " << func_state.name << " exited with error: " << e.what() << std::endl;
+                    return -1;
+                }
+                return 0;
+            }
 
-            ~Runner();
+            std::vector<std::string> get_deleted_resources() {
+                std::vector<std::string> resources;
+                for(auto res: func_state.resources){
+                    if(local_resources.find(res) == local_resources.end()){
+                        resources.push_back(res);
+                    }
+                }
+                return resources;
+            }
+
+            ~CPPRunner() {
+                cur_runner = nullptr;
+            }  
         
-        private:
+        protected:
             std::unordered_map<std::string, Resource*> local_resources;
             FunctionState func_state;
     };
-
-    inline thread_local Runner* cur_runner = nullptr;
 }

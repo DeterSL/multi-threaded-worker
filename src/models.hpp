@@ -18,32 +18,24 @@ struct FunctionState {
 
 struct Resource {
   public:
-    Resource(void *data_) : data(data_)
-  {}
-    template<typename T>
-    T& get_data() const {
-        if(data == nullptr) {
-            throw std::runtime_error("Resource data is null");
+    Resource(std::vector<uint8_t> data_) : data(data_)
+    {}
+
+    std::vector<uint8_t> get_data() const {
+        if(data.empty()) {
+            throw std::runtime_error("Resource data is empty");
         }
-        return *reinterpret_cast<T*>(data);
+        return data;
     }
 
-    Resource operator=(const Resource& t)
+    void set_data(std::vector<uint8_t> &&data_)
     {
-        return Resource(t.data);
+        data = std::move(data_);
     }
 
-    void set_data(void *data_)
-    {
-        data = data_;
-    }
-
-    template<typename T>
     void free_data()
     {
-        std::cout << "Freeing Resource data via free_data()" << std::endl;
-        delete reinterpret_cast<T*>(data);
-        data = nullptr;
+        data.clear();
     }
 
     // void set_delete()
@@ -54,15 +46,15 @@ struct Resource {
     ~Resource()
     {
         std::cout << "Resource destructor called" << std::endl;
-        if(data != nullptr)
+        if(!data.empty())
         {
             std::cout << "Freeing Resource data in destructor" << std::endl;
-            delete reinterpret_cast<char*>(data);
+            free_data();
         }
     }
 
   private:
-    void *data;
+    std::vector<uint8_t> data;
     // bool to_delete = false;
 };
 

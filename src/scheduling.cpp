@@ -2,6 +2,7 @@
 
 #include <dlfcn.h>
 #include <fstream>
+#include <vector>
 #include "basic-net.hpp"
 
 using json = nlohmann::json;
@@ -20,23 +21,23 @@ void schedule_function(FunctionState func_state)
 {
   size_t num_res = func_state.resources.size();
 
-  cown_ptr<Resource>* resource_array = new cown_ptr<Resource>[num_res];
-  for (size_t i = 0; i < func_state.resources.size(); i++)
+  std::vector<cown_ptr<Resource>> resource_array;
+  resource_array.reserve(num_res);
+  for (size_t i = 0; i < num_res; i++)
   {
     auto res_name = func_state.resources[i];
     if (resource_map.find(res_name) == resource_map.end())
     {
       std::cout << "Creating new cown for resource: " << res_name << std::endl;
-      resource_map[res_name] = make_cown<Resource>(nullptr);
+      resource_map[res_name] = make_cown<Resource>(std::vector<uint8_t>());
     }
-    resource_array[i] = resource_map[res_name];
+    resource_array.push_back(resource_map[res_name]);
   }
 
-  cown_array<Resource> cowns{resource_array, num_res};
-  delete[] resource_array;
+  cown_array<Resource> cowns{resource_array.data(), num_res};
 
   when(cowns) << [func_state](auto c) {
-    detersl::worker::Runner runner(c, func_state);
+    detersl::worker::CPPRunner runner(c, func_state);
 
     int ret = runner.run_function(all_functions[func_state.name]);
 
@@ -109,8 +110,6 @@ void register_and_schedule()
 void hardcoded_test()
 {
   parse_and_load("print_input");
-  parse_and_load("print_input");
-  parse_and_load("access_cowns");
   parse_and_load("access_cowns");
 }
 
