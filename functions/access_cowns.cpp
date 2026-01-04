@@ -1,8 +1,7 @@
 #include <iostream>
 #include <thread>
 #include <nlohmann/json.hpp>
-#include "../src/detersl.h"
-#include "../src/runner.hpp"
+#include "detersl.h"
 #include "shared_objects.h"
 
 using namespace detersl;
@@ -10,11 +9,12 @@ using namespace detersl;
 extern "C" int func(std::string input)
 {
   Body b{5};
-  set_resource<Body>("res3", b);
 
-  std::cout << "res3 is " << get_resource<Body>("res3").x << std::endl;
+  set_resource("res3", b.as_string());
 
-  delete_resource<Body>("res3");
+  std::cout << "res3 is " << Body::from_string(get_resource("res3")).x << std::endl;
+
+  delete_resource("res3");
 
   return 0;
 }

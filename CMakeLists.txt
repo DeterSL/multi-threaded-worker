@@ -27,17 +27,24 @@ endif()
 set(VERONA_RT_PATH "external/verona-rt")
 set(SNMALLOC_PATH "external/snmalloc")
 
+set(WASM_EXEC_ENV_PATH "${CMAKE_CURRENT_LIST_DIR}/external/wasm-exec-env" CACHE PATH "Path to wasm-exec-env crate")
+add_subdirectory(${WASM_EXEC_ENV_PATH} wasm-exec-env_build)
+
 add_library(detersl_common INTERFACE)
 
 target_include_directories(detersl_common INTERFACE
     ${VERONA_RT_PATH}/src/rt
     ${SNMALLOC_PATH}/src
+    ${CMAKE_BINARY_DIR}/wasm-exec-env_build/cxxbridge
+    ${WASM_EXEC_ENV_PATH}/include
 )
 
 target_compile_definitions(detersl_common INTERFACE
     -DSNMALLOC_USE_WAIT_ON_ADDRESS=1
     -DSNMALLOC_PASS_THROUGH
 )
+
+target_compile_options(detersl_common INTERFACE -mcx16)
 
 # ------------------------------------------------------------
 # Executable
@@ -90,6 +97,10 @@ foreach(FN ${FUNCTION_SOURCES})
     target_link_libraries(${BASENAME} PRIVATE
         detersl_common
         nlohmann_json::nlohmann_json
+    )
+    
+    target_include_directories(${BASENAME} PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
 
     set_target_properties(${BASENAME} PROPERTIES

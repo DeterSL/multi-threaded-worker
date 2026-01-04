@@ -3,57 +3,74 @@
 #include <dlfcn.h>
 #include <fstream>
 #include "basic-net.hpp"
+#include "cpp-func.hpp"
+#include "cpp-runner.hpp"
+#include "cpp/cown.h"
+#include "func.hpp"
+#include "resource.hpp"
+#include "types.hpp"
+
+#include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
 
 namespace detersl::worker {
 
-std::unordered_map<std::string, FunctionType> all_functions;
-std::unordered_map<std::string, cown_ptr<Resource>> resource_map;
+std::unordered_map<std::string, detersl::types::FunctionType> all_functions;
+std::unordered_map<std::string, cown_ptr<detersl::types::Resource>> resource_map;
 
-void register_function(const std::string& name, FunctionType fn)
+void register_function(const std::string& name, detersl::types::FunctionType fn)
 {
   all_functions[name] = fn;
 }
 
-void schedule_function(FunctionState func_state)
+void schedule_function(detersl::func::CPPFuncInfo func_info, detersl::func::CPPFunc func)
 {
-  size_t num_res = func_state.resources.size();
+  size_t num_res = func_info.resources.size();
 
-  cown_ptr<Resource>* resource_array = new cown_ptr<Resource>[num_res];
-  for (size_t i = 0; i < func_state.resources.size(); i++)
+  cown_ptr<detersl::types::Resource>* resource_array = new cown_ptr<detersl::types::Resource>[num_res];
+  for (size_t i = 0; i < func_info.resources.size(); i++)
   {
-    auto res_name = func_state.resources[i];
+    auto res_name = func_info.resources[i];
     if (resource_map.find(res_name) == resource_map.end())
     {
       std::cout << "Creating new cown for resource: " << res_name << std::endl;
-      resource_map[res_name] = make_cown<Resource>(nullptr);
+      resource_map[res_name] = make_cown<detersl::types::Resource>();
     }
     resource_array[i] = resource_map[res_name];
   }
 
-  cown_array<Resource> cowns{resource_array, num_res};
+  cown_array<detersl::types::Resource> cowns{resource_array, num_res};
   delete[] resource_array;
 
-  when(cowns) << [func_state](auto c) {
-    detersl::worker::Runner runner(c, func_state);
+  when(cowns) << [func_info, func](auto c) {
+    detersl::runner::CPPRunner runner(c, func_info, func);
 
-    int ret = runner.run_function(all_functions[func_state.name]);
+    // TODO: maybe a return code of funciton?
+    // Like previous version
+    runner.run();
 
-    if (ret == 0)
-    {
-      for (const auto& res_name : runner.get_deleted_resources())
-      {
+    for (const auto& res_name : runner.get_deleted_resources()) {
         std::cout << "Deleting resource cown: " << res_name << std::endl;
         resource_map.erase(res_name);
-      }
     }
   };
 }
 
+std::string read_file_as_string(const std::string& filename) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        throw std::runtime_error("Could not open file: " + filename);
+    }
+
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+
 int parse_and_load(const std::string& func_name)
 {
-  void* handle = dlopen((func_name + ".dylib").c_str(), RTLD_NOW);
+  void* handle = dlopen(("./" + func_name + ".so").c_str(), RTLD_NOW | RTLD_GLOBAL);
   if (!handle)
   {
     std::cerr << "dlopen error: " << dlerror() << "\n";
@@ -62,7 +79,7 @@ int parse_and_load(const std::string& func_name)
 
   dlerror(); // clear any existing error
 
-  FunctionType fn = (FunctionType)dlsym(handle, "func");
+  detersl::types::FunctionType fn = (detersl::types::FunctionType)dlsym(handle, "func");
   const char* err = dlerror();
   if (err)
   {
@@ -73,12 +90,13 @@ int parse_and_load(const std::string& func_name)
   register_function(func_name, fn);
 
   std::ifstream ifs("../functions/" + func_name + ".json");
-  json jf = json::parse(ifs);
-  FunctionState f = jf.get<FunctionState>();
+  std::string json_config = read_file_as_string("../functions/" + func_name + ".json");
+  detersl::func::CPPFuncInfo f = detersl::func::CPPFuncInfo::from_json(json_config);
+  detersl::func::CPPFunc func(fn, f);
 
   std::cout << "Loaded: " << func_name << std::endl;
 
-  schedule_function(f);
+  schedule_function(f, func);
   return 0;
 }
 
@@ -125,7 +143,7 @@ size_t resource_count_for_tests()
   return resource_map.size();
 }
 
-cown_ptr<Resource> get_cown_for_resource(const std::string& name)
+cown_ptr<detersl::types::Resource> get_cown_for_resource(const std::string& name)
 {
   auto it = resource_map.find(name);
   if (it == resource_map.end())

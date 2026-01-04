@@ -1,41 +1,44 @@
 #include "runner.hpp"
+#include "func.hpp"
+#include "kv.hpp"
+#include <cassert>
+#include <iostream>
 
 using namespace verona::rt;
 using namespace verona::cpp;
 
-namespace detersl::worker {
+namespace detersl::runner {
    
-    Runner::Runner(acquired_cown_span<Resource> cown_arr, const FunctionState func_state_): func_state(func_state_){
-            for(size_t i = 0; i < func_state.resources.size(); i++){
-                local_resources[func_state.resources[i]] = &(*cown_arr.array[i]);
-            }
-            cur_runner = this;
-    }
-
-    int Runner::run_function(int(*func)(std::string)) {
-        std::cout << "Running " << func_state.name << " from thread : " << std::this_thread::get_id() << "\n";
-
-        json input_json = func_state;
-        try{
-            func(input_json.dump());
-        } catch(const std::exception& e){
-            std::cerr << "Function " << func_state.name << " exited with error: " << e.what() << std::endl;
-            return -1;
+    Runner::Runner(acquired_cown_span<detersl::types::Resource> cown_arr,
+            detersl::func::BasicFuncInfo basic_func) : func_info_(basic_func) {
+        std::unordered_map<std::string, detersl::types::Resource*> local_resources;
+        for (size_t i = 0; i < func_info_.resources.size(); i++) {
+            local_resources[func_info_.resources[i]] = &(*cown_arr.array[i]);
         }
-        return 0;
+
+        if (cur_runner != nullptr) {
+            // This means that we are changing the current runner ptr
+            // without destroying the previous one
+            assert(false);
+        }
+            
+        storage = new detersl::kv::ResourceStorage(local_resources);
+        std::cout << "Runner created in thread: " << std::this_thread::get_id() << "\n";
+        cur_runner = this;
     }
 
     std::vector<std::string> Runner::get_deleted_resources() {
-        std::vector<std::string> resources;
-        for(auto res: func_state.resources){
-            if(local_resources.find(res) == local_resources.end()){
-                resources.push_back(res);
+        std::vector<std::string> deleted_resources;
+        for(auto& res : func_info_.resources) {
+            if (storage->get_resource(res) == nullptr) {
+                deleted_resources.push_back(res);
             }
         }
-        return resources;
+        return deleted_resources;
     }
 
     Runner::~Runner() {
+        std::cout << "Runner destroyed at " << this << std::endl;
         cur_runner = nullptr;
     }  
 }

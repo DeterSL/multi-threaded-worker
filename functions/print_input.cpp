@@ -1,16 +1,16 @@
 #include <iostream>
+#include <string>
 #include <thread>
 #include <nlohmann/json.hpp>
-#include "../src/detersl.h"
-#include "../src/runner.hpp"
+#include "detersl.h"
 #include "shared_objects.h"
 
 using namespace detersl;
 
 extern "C" int func(std::string input)
 {
-  set_resource<int>("res1", 8);
-  set_resource<std::string>("res2", std::string("Hello World!"));
+  set_resource("res1", std::to_string(8));
+  set_resource("res2", std::string("Hello World!"));
 
   // std::cout << "res1 is " << get_resource<int>("res1") << " and res2 is " <<
   // get_resource<std::string>("res2") << std::endl;

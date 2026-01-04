@@ -1,37 +1,37 @@
 #pragma once
 
-#include "models.hpp"
+#include "bytes.hpp"
 #include "runner.hpp"
+#include <cstdint>
 #include <verona.h>
 #include <cpp/when.h>
 
 using namespace verona::rt;
 using namespace verona::cpp;
-using json = nlohmann::json;
 
 namespace detersl {
-    template<typename T>
-    T& get_resource(const std::string& name) {
-        return worker::cur_runner->get_resource<T>(name);
+
+    // TODO: this method copies data which is not ideal
+    std::string get_resource(const std::string& name) {
+        auto bytes = runner::cur_runner->storage->get_resource(name)->get_data().as_vec();
+        return std::string((char*)bytes.data(), bytes.size());
     }
 
-    template<class T>
-    void set_resource(const std::string &name, T& value)
-    {
-        return worker::cur_runner->set_resource<T>(name, value);
+    void set_resource(const std::string &name, std::string& value) {
+        std::cout << "set_resource called in thread: " << std::this_thread::get_id() << "\n";
+        if (!runner::cur_runner->storage) {
+            throw std::runtime_error("Runner storage is null.");
+        }
+        auto bytes = types::Bytes((uint8_t*)value.data(), value.size());
+        runner::cur_runner->storage->set_resource(name, types::Resource(std::move(bytes)));
     }
 
-    // Overload for rvalue references
-    template<class T>
-    void set_resource(const std::string &name, T&& value)
-    {
-        T temp = std::move(value);
-        return worker::cur_runner->set_resource<T>(name, temp);
+    void set_resource(const std::string &name, std::string&& value) {
+        auto bytes = types::Bytes((uint8_t*)value.data(), value.size());
+        runner::cur_runner->storage->set_resource(name, types::Resource(std::move(bytes)));
     }
 
-    template<class T>
     void delete_resource(const std::string &name){
-        return worker::cur_runner->delete_resource<T>(name);
+        runner::cur_runner->storage->delete_resource(name);
     }
-
 }
