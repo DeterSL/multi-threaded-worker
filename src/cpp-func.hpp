@@ -25,8 +25,6 @@ namespace detersl {
                 CPPFuncInfo cpp_info(basic_info);
                 auto j = nlohmann::json::parse(json);
 
-                // Parse additional fields for CPPFuncInfo
-                // For example: parse `in` if serialized
                 cpp_info.in = j.value("in", detersl::types::FunctionInput{}); 
 
                 return cpp_info;

@@ -1,5 +1,35 @@
 {
   "func_name": "matmul",
-  "func_invocation_id": "1",
-  "resources": ["res1", "res2"]
+  "func_invocation_id": "00000000-0000-0000-0000-000000000001",
+  "func_binary_hash": "a4d8948e72dc764235444f9a33a9796c1",
+  "func_binary_source": {
+    "type": "fs",
+    "path": "/home/sod/research/serverless/source-code/detersl_runtime_example/matmul/matmul.wasm"
+  },
+  "func_input_event": {
+    "type": "data",
+    "data": "{ \"name\": \"idk\", \"age\": 150, \"work\": \"N/A\", \"n\": 6 }"
+  },
+  "func_output_event": {
+    "type": "default"
+  },
+  "func_link_opt": {
+    "link_clocks": true,
+    "link_filesystem": true,
+    "link_random": true,
+    "link_cli": true,
+    "link_io": true,
+    "link_socket": true
+  },
+  "func_execution_policy": {
+    "allow_clocks": true,
+    "allow_filesystem": false,
+    "allow_random": true,
+    "allow_cli": true,
+    "allow_socket": false 
+  },
+  "func_initial_values": {
+    "init_clock": 0,
+    "random_seed": 42
+  }
 }
