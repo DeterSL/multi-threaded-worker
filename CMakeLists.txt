@@ -21,6 +21,13 @@ if (NOT nlohmann_json_FOUND)
     FetchContent_MakeAvailable(nlohmann_json)
 endif()
 
+find_package(OpenSSL REQUIRED)
+
+message(STATUS "OpenSSL_VERSION = ${OpenSSL_VERSION}")
+message(STATUS "OPENSSL_INCLUDE_DIR = ${OPENSSL_INCLUDE_DIR}")
+message(STATUS "OPENSSL_SSL_LIBRARY = ${OPENSSL_SSL_LIBRARY}")
+message(STATUS "OPENSSL_CRYPTO_LIBRARY = ${OPENSSL_CRYPTO_LIBRARY}")
+
 # ------------------------------------------------------------
 # Shared header dependencies (Verona, snmalloc, etc)
 # ------------------------------------------------------------
@@ -37,6 +44,7 @@ target_include_directories(detersl_common INTERFACE
     ${SNMALLOC_PATH}/src
     ${CMAKE_BINARY_DIR}/wasm-exec-env_build/cxxbridge
     ${WASM_EXEC_ENV_PATH}/include
+    /usr/include
 )
 
 target_compile_definitions(detersl_common INTERFACE
@@ -45,6 +53,11 @@ target_compile_definitions(detersl_common INTERFACE
 )
 
 target_compile_options(detersl_common INTERFACE -mcx16)
+
+target_link_libraries(detersl_common INTERFACE
+    OpenSSL::SSL
+    OpenSSL::Crypto
+)
 
 # ------------------------------------------------------------
 # Executable
@@ -70,7 +83,19 @@ add_executable(detersl-worker
 
 target_link_libraries(detersl-worker PRIVATE
     detersl_worker_core
+    detersl::ffi
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    dl
+    pthread
 )
+
+target_include_directories(detersl-worker PRIVATE ${OPENSSL_INCLUDE_DIR})
+target_link_libraries(detersl-worker PRIVATE ${OPENSSL_CRYPTO_LIBRARY} ${OPENSSL_SSL_LIBRARY})
+
+if (UNIX AND NOT APPLE)
+  target_link_options(detersl-worker PRIVATE -Wl,--no-as-needed)
+endif()
 
 # add_executable(detersl-worker 
 #     src/main.cpp

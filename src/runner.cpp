@@ -3,6 +3,7 @@
 #include "kv.hpp"
 #include <cassert>
 #include <iostream>
+#include <memory>
 
 using namespace verona::rt;
 using namespace verona::cpp;
@@ -22,7 +23,7 @@ namespace detersl::runner {
             assert(false);
         }
             
-        storage = new detersl::kv::ResourceStorage(local_resources);
+        storage = std::make_unique<detersl::kv::ResourceStorage>(std::move(local_resources));
         std::cout << "Runner created in thread: " << std::this_thread::get_id() << "\n";
         cur_runner = this;
     }

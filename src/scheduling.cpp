@@ -6,9 +6,10 @@
 #include "cpp-func.hpp"
 #include "cpp-runner.hpp"
 #include "cpp/cown.h"
-#include "func.hpp"
 #include "resource.hpp"
 #include "types.hpp"
+#include "wasm-func.hpp"
+#include "wasm-runner.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -24,7 +25,7 @@ void register_function(const std::string& name, detersl::types::FunctionType fn)
   all_functions[name] = fn;
 }
 
-void schedule_function(detersl::func::CPPFuncInfo func_info, detersl::func::CPPFunc func)
+void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::WasmFunc func)
 {
   size_t num_res = func_info.resources.size();
 
@@ -44,7 +45,7 @@ void schedule_function(detersl::func::CPPFuncInfo func_info, detersl::func::CPPF
   delete[] resource_array;
 
   when(cowns) << [func_info, func](auto c) {
-    detersl::runner::CPPRunner runner(c, func_info, func);
+    detersl::runner::WasmRunner runner(c, func_info, func);
 
     // TODO: maybe a return code of funciton?
     // Like previous version
@@ -68,37 +69,59 @@ std::string read_file_as_string(const std::string& filename) {
     return buffer.str();
 }
 
+/*int parse_and_load(const std::string& func_name)*/
+/*{*/
+  /*void* handle = dlopen(("./" + func_name + ".so").c_str(), RTLD_NOW | RTLD_GLOBAL);*/
+  /*if (!handle)*/
+  /*{*/
+    /*std::cerr << "dlopen error: " << dlerror() << "\n";*/
+    /*return 1;*/
+  /*}*/
+
+  /*dlerror(); // clear any existing error*/
+
+  /*detersl::types::FunctionType fn = (detersl::types::FunctionType)dlsym(handle, "func");*/
+  /*const char* err = dlerror();*/
+  /*if (err)*/
+  /*{*/
+    /*std::cerr << "dlsym error: " << err << "\n";*/
+    /*return 1;*/
+  /*}*/
+
+  /*register_function(func_name, fn);*/
+
+  /*std::ifstream ifs("../functions/" + func_name + ".json");*/
+  /*std::string json_config = read_file_as_string("../functions/" + func_name + ".json");*/
+  /*detersl::func::CPPFuncInfo f = detersl::func::CPPFuncInfo::from_json(json_config);*/
+  /*detersl::func::CPPFunc func(fn, f);*/
+
+  /*std::cout << "Loaded: " << func_name << std::endl;*/
+
+  /*schedule_function(f, func);*/
+  /*return 0;*/
+/*}*/
+
 int parse_and_load(const std::string& func_name)
 {
-  void* handle = dlopen(("./" + func_name + ".so").c_str(), RTLD_NOW | RTLD_GLOBAL);
-  if (!handle)
-  {
-    std::cerr << "dlopen error: " << dlerror() << "\n";
+  const std::string path = "../functions/" + func_name + ".json";
+  std::string json_config = read_file_as_string(path);
+
+  nlohmann::json j;
+  try {
+    j = nlohmann::json::parse(json_config);
+  } catch (const nlohmann::json::parse_error& e) {
+    std::cerr << "JSON parse error in " << path << ": " << e.what() << "\n";
     return 1;
   }
 
-  dlerror(); // clear any existing error
-
-  detersl::types::FunctionType fn = (detersl::types::FunctionType)dlsym(handle, "func");
-  const char* err = dlerror();
-  if (err)
-  {
-    std::cerr << "dlsym error: " << err << "\n";
-    return 1;
-  }
-
-  register_function(func_name, fn);
-
-  std::ifstream ifs("../functions/" + func_name + ".json");
-  std::string json_config = read_file_as_string("../functions/" + func_name + ".json");
-  detersl::func::CPPFuncInfo f = detersl::func::CPPFuncInfo::from_json(json_config);
-  detersl::func::CPPFunc func(fn, f);
+  detersl::func::WasmFuncInfo f = detersl::func::WasmFuncInfo::from_json(j);
+  detersl::func::WasmFunc func(f);
 
   std::cout << "Loaded: " << func_name << std::endl;
-
   schedule_function(f, func);
   return 0;
 }
+
 
 void register_and_schedule()
 {
@@ -126,10 +149,10 @@ void register_and_schedule()
 
 void hardcoded_test()
 {
-  parse_and_load("print_input");
-  parse_and_load("print_input");
-  parse_and_load("access_cowns");
-  parse_and_load("access_cowns");
+  parse_and_load("matmul");
+  //parse_and_load("print_input");
+  //parse_and_load("access_cowns");
+  //parse_and_load("access_cowns");
 }
 
 void clear_state_for_tests()

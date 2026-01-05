@@ -18,10 +18,6 @@ namespace detersl {
     }
 
     void set_resource(const std::string &name, std::string& value) {
-        std::cout << "set_resource called in thread: " << std::this_thread::get_id() << "\n";
-        if (!runner::cur_runner->storage) {
-            throw std::runtime_error("Runner storage is null.");
-        }
         auto bytes = types::Bytes((uint8_t*)value.data(), value.size());
         runner::cur_runner->storage->set_resource(name, types::Resource(std::move(bytes)));
     }

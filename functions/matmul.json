@@ -1,0 +1,5 @@
+{
+  "func_name": "matmul",
+  "func_invocation_id": "1",
+  "resources": ["res1", "res2"]
+}

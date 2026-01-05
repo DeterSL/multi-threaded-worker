@@ -25,7 +25,7 @@ namespace detersl {
                 Runner(Runner&&) = delete;
                 Runner& operator=(Runner&&) = delete;
 
-                detersl::kv::ResourceStorage* storage;
+                std::unique_ptr<detersl::kv::ResourceStorage> storage;
 
             protected:
                 detersl::func::BasicFuncInfo func_info_;
