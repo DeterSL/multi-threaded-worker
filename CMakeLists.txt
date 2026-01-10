@@ -52,7 +52,9 @@ target_compile_definitions(detersl_common INTERFACE
     -DSNMALLOC_PASS_THROUGH
 )
 
-target_compile_options(detersl_common INTERFACE -mcx16)
+if (UNIX AND NOT APPLE)
+  target_compile_options(detersl_common INTERFACE -mcx16)
+endif()
 
 target_link_libraries(detersl_common INTERFACE
     OpenSSL::SSL
