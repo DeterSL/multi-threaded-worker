@@ -25,16 +25,14 @@ namespace detersl {
                     return value->second;
                 }
 
-                virtual void set_resource(const std::string& key, detersl::types::Resource&& resource) {
+                virtual void set_resource(const std::string& key, detersl::types::Bytes&& data) {
                     if (local_resources_.find(key) == local_resources_.end()) {
                         // The resource storage only manage the storage that has been given to it
                         // any new value that is gonna be set should be inside the local resource
                         // and it is not permitted to generate new value.
                         assert(false);
                     }
-
-                    detersl::types::Resource* store = new detersl::types::Resource(std::move(resource));
-                    local_resources_[key] = std::move(store);
+                    local_resources_[key]->set_data(std::move(data));
                 }
 
                 virtual void delete_resource(const std::string& key) {
@@ -50,7 +48,7 @@ namespace detersl {
                 }
 
                 ~ResourceStorage() {
-
+                    std::cout << "ResourceStorage destructor called" << std::endl;
                 }
 
             private:

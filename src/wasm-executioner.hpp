@@ -22,6 +22,7 @@ namespace detersl {
                     const std::string config = func.to_json().dump();
                     std::cout << "haha" << std::endl;
                     auto out = exec_->executioner_run_json(config);
+                    std::cout << "the value of test is :" <<  std::string(out.begin(), out.end()) << std::endl;
                     std::cout << "haha1" << std::endl;
 
                     // TODO: the function out can be anything

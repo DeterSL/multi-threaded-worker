@@ -39,10 +39,8 @@ namespace detersl {
 
             void set(rust::Str key, rust::Slice<const uint8_t> data) override {
                 std::string key_str(key.data(), key.size());
-                auto new_resource = detersl::types::Resource(
-                    detersl::types::Bytes(data.data(), data.size())); 
 
-                resource_storage_->set_resource(key_str, std::move(new_resource));
+                resource_storage_->set_resource(key_str, std::move(detersl::types::Bytes(data.data(), data.size())));
             }
 
             bool delete_key(rust::Str key) override {

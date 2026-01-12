@@ -19,12 +19,12 @@ namespace detersl {
 
     void set_resource(const std::string &name, std::string& value) {
         auto bytes = types::Bytes((uint8_t*)value.data(), value.size());
-        runner::cur_runner->storage->set_resource(name, types::Resource(std::move(bytes)));
+        runner::cur_runner->storage->set_resource(name, std::move(bytes));
     }
 
     void set_resource(const std::string &name, std::string&& value) {
         auto bytes = types::Bytes((uint8_t*)value.data(), value.size());
-        runner::cur_runner->storage->set_resource(name, types::Resource(std::move(bytes)));
+        runner::cur_runner->storage->set_resource(name, std::move(bytes));
     }
 
     void delete_resource(const std::string &name){

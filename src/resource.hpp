@@ -33,6 +33,10 @@ namespace detersl {
                     data_ = detersl::types::Bytes((uint8_t*)data, size);
                 }
 
+                void set_data(detersl::types::Bytes&& data) {
+                    data_ = std::move(data);
+                }
+
                 void free_data() {
                     std::cout << "Freeing Resource data via free_data()" << std::endl;
                 }
