@@ -41,9 +41,9 @@ namespace detersl {
                     }
 
                     // TODO: this logic of deleting data by hand is dirty
+                    // but is necessary for now since the resource might 
+                    // not be deleted right after the current function is executed.
                     local_resources_[key]->free_data();
-                    
-                    delete local_resources_[key];
                     local_resources_.erase(key);
                 }
 

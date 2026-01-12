@@ -38,6 +38,7 @@ namespace detersl {
                 }
 
                 void free_data() {
+                    data_ = detersl::types::Bytes();
                     std::cout << "Freeing Resource data via free_data()" << std::endl;
                 }
 

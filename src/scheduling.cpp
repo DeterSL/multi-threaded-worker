@@ -53,6 +53,7 @@ void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::Was
 
     for (const auto& res_name : runner.get_deleted_resources()) {
         std::cout << "Deleting resource cown: " << res_name << std::endl;
+        // will actually get deleted when no cowns is pointing to it
         resource_map.erase(res_name);
     }
   };
@@ -149,6 +150,7 @@ void register_and_schedule()
 
 void hardcoded_test()
 {
+  parse_and_load("matmul");
   parse_and_load("matmul");
   //parse_and_load("print_input");
   //parse_and_load("access_cowns");
