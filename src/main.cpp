@@ -22,7 +22,7 @@ int main(int argc, char **argv)
     Scheduler::add_external_event_source();
     
     //std::thread t(register_and_schedule);
-    std::thread t(detersl::worker::hardcoded_test);
+    std::thread t(detersl::worker::register_and_schedule);
     t.detach();
   };
 

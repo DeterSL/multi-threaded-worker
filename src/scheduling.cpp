@@ -70,42 +70,49 @@ std::string read_file_as_string(const std::string& filename) {
     return buffer.str();
 }
 
-/*int parse_and_load(const std::string& func_name)*/
-/*{*/
-  /*void* handle = dlopen(("./" + func_name + ".so").c_str(), RTLD_NOW | RTLD_GLOBAL);*/
-  /*if (!handle)*/
-  /*{*/
-    /*std::cerr << "dlopen error: " << dlerror() << "\n";*/
-    /*return 1;*/
-  /*}*/
+// int parse_and_load_cpp(const std::string& func_name)
+// {
+//   void* handle = dlopen(("./" + func_name + ".dylib").c_str(), RTLD_NOW | RTLD_GLOBAL);
+//   if (!handle)
+//   {
+//     std::cerr << "dlopen error: " << dlerror() << "\n";
+//     return 1;
+//   }
 
-  /*dlerror(); // clear any existing error*/
+//   dlerror(); // clear any existing error
 
-  /*detersl::types::FunctionType fn = (detersl::types::FunctionType)dlsym(handle, "func");*/
-  /*const char* err = dlerror();*/
-  /*if (err)*/
-  /*{*/
-    /*std::cerr << "dlsym error: " << err << "\n";*/
-    /*return 1;*/
-  /*}*/
+//   detersl::types::FunctionType fn = (detersl::types::FunctionType)dlsym(handle, "func");
+//   const char* err = dlerror();
+//   if (err)
+//   {
+//     std::cerr << "dlsym error: " << err << "\n";
+//     return 1;
+//   }
 
-  /*register_function(func_name, fn);*/
+//   register_function(func_name, fn);
 
-  /*std::ifstream ifs("../functions/" + func_name + ".json");*/
-  /*std::string json_config = read_file_as_string("../functions/" + func_name + ".json");*/
-  /*detersl::func::CPPFuncInfo f = detersl::func::CPPFuncInfo::from_json(json_config);*/
-  /*detersl::func::CPPFunc func(fn, f);*/
+//   std::ifstream ifs("../functions/" + func_name + ".json");
+//   std::string json_config = read_file_as_string("../functions/" + func_name + ".json");
+//   detersl::func::CPPFuncInfo f = detersl::func::CPPFuncInfo::from_json(json_config);
+//   detersl::func::CPPFunc func(fn, f);
 
-  /*std::cout << "Loaded: " << func_name << std::endl;*/
+//   std::cout << "Loaded: " << func_name << std::endl;
 
-  /*schedule_function(f, func);*/
-  /*return 0;*/
-/*}*/
+//   schedule_function(f, func);
+//   return 0;
+// }
 
 int parse_and_load(const std::string& func_name)
 {
   const std::string path = "../functions/" + func_name + ".json";
-  std::string json_config = read_file_as_string(path);
+  std::string json_config;
+  
+  try{
+    json_config = read_file_as_string(path);
+  } catch (const std::runtime_error& e) {
+    std::cerr << "Could not find file: " << path << "\n";
+    return 1;
+  }
 
   nlohmann::json j;
   try {
@@ -150,11 +157,11 @@ void register_and_schedule()
 
 void hardcoded_test()
 {
-  parse_and_load("matmul");
-  parse_and_load("matmul");
-  //parse_and_load("print_input");
-  //parse_and_load("access_cowns");
-  //parse_and_load("access_cowns");
+  //parse_and_load("matmul");
+  //parse_and_load("matmul");
+  // parse_and_load_cpp("print_input");
+  // parse_and_load_cpp("access_cowns");
+  // parse_and_load_cpp("access_cowns");
 }
 
 void clear_state_for_tests()
