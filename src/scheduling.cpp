@@ -45,6 +45,16 @@ void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::Was
   delete[] resource_array;
 
   when(cowns) << [func_info, func](auto c) {
+    for (size_t i = 0; i < func_info.resources.size(); i++)
+    {
+      auto& resource = *c.array[i];
+      if (resource.is_deleted())
+      {
+        std::cout << "Skipping function because resource is deleted: " << func_info.resources[i] << std::endl;
+        return;
+      }
+    }
+    
     detersl::runner::WasmRunner runner(c, func_info, func);
 
     // TODO: maybe a return code of funciton?
@@ -52,9 +62,7 @@ void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::Was
     runner.run();
 
     for (const auto& res_name : runner.get_deleted_resources()) {
-        std::cout << "Deleting resource cown: " << res_name << std::endl;
-        // will actually get deleted when no cowns is pointing to it
-        resource_map.erase(res_name);
+      std::cout << "Resource marked deleted: " << res_name << std::endl;
     }
   };
 }
@@ -106,7 +114,7 @@ int parse_and_load(const std::string& func_name)
 {
   const std::string path = "../functions/" + func_name + ".json";
   std::string json_config;
-  
+
   try{
     json_config = read_file_as_string(path);
   } catch (const std::runtime_error& e) {

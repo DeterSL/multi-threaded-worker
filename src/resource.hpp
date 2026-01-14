@@ -24,8 +24,17 @@ namespace detersl {
                     return data_;
                 }
 
+                bool is_deleted() const {
+                    return deleted_;
+                }
+
+                void mark_deleted() {
+                    deleted_ = true;
+                }
+
                 Resource& operator=(const Resource& t) {
                     data_ = t.data_;
+                    deleted_ = t.deleted_;
                     return *this; 
                 }
 
@@ -48,6 +57,7 @@ namespace detersl {
 
             private:
                 detersl::types::Bytes data_;
+                bool deleted_ = false;
         };
     }
 }

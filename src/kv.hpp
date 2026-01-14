@@ -30,7 +30,9 @@ namespace detersl {
                         // The resource storage only manage the storage that has been given to it
                         // any new value that is gonna be set should be inside the local resource
                         // and it is not permitted to generate new value.
+                        // TODO: manage this error better because assert gets optimized away
                         assert(false);
+                        return;
                     }
                     local_resources_[key]->set_data(std::move(data));
                 }
@@ -40,10 +42,7 @@ namespace detersl {
                         return;
                     }
 
-                    // TODO: this logic of deleting data by hand is dirty
-                    // but is necessary for now since the resource might 
-                    // not be deleted right after the current function is executed.
-                    local_resources_[key]->free_data();
+                    local_resources_[key]->mark_deleted();
                     local_resources_.erase(key);
                 }
 

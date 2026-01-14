@@ -61,7 +61,11 @@ namespace detersl {
                 }
 
                 void run() override {
-                    worker_excutioner->execution_func(func_);
+                    try{
+                        worker_excutioner->execution_func(func_);
+                    } catch (const std::exception& e) {
+                        std::cerr << "Exception during WasmRunner run: " << e.what() << std::endl;
+                    }
 
                     // Bring back storage.
                     // The reason why we did not use shared ptr is that
