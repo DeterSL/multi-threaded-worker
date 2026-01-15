@@ -10,6 +10,7 @@
 #include "types.hpp"
 #include "wasm-func.hpp"
 #include "wasm-runner.hpp"
+#include "thread-safe-queue.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -19,7 +20,9 @@ namespace detersl::worker {
 
 std::unordered_map<std::string, detersl::types::FunctionType> all_functions;
 std::unordered_map<std::string, cown_ptr<detersl::types::Resource>> resource_map;
+BasicMPSCQueue<std::string> deleted_resources_queue;
 
+// namespace detersl::worker
 void register_function(const std::string& name, detersl::types::FunctionType fn)
 {
   all_functions[name] = fn;
@@ -50,7 +53,7 @@ void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::Was
       auto& resource = *c.array[i];
       if (resource.is_deleted())
       {
-        std::cout << "Skipping function because resource is deleted: " << func_info.resources[i] << std::endl;
+        std::cout << "Skipping function because resource is marked for deletion: " << func_info.resources[i] << std::endl;
         return;
       }
     }
@@ -62,7 +65,7 @@ void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::Was
     runner.run();
 
     for (const auto& res_name : runner.get_deleted_resources()) {
-      std::cout << "Resource marked deleted: " << res_name << std::endl;
+      deleted_resources_queue.push(res_name);
     }
   };
 }
@@ -138,10 +141,24 @@ int parse_and_load(const std::string& func_name)
   return 0;
 }
 
+int cleanup_resources()
+{
+  std::string res_name;
+  while(!(res_name = deleted_resources_queue.pop()).empty()){
+    std::cout << "Deleting resource: " << res_name << std::endl;
+    auto it = resource_map.find(res_name);
+    if (it != resource_map.end())
+    {
+      resource_map.erase(it);
+    }
+  }
+}
 
 void register_and_schedule()
 {
   int client_fd = listen_and_accept_client_connection(6666);
+  const int delete_after_n_func = 3;
+  int func_count = 0;
 
   while (1)
   {
@@ -159,7 +176,16 @@ void register_and_schedule()
       break;
     }
     buffer[n - 1] = '\0';
-    parse_and_load(buffer);
+
+    if(func_count >= delete_after_n_func) {
+      func_count = 0;
+      cleanup_resources();
+    }
+
+    if(parse_and_load(buffer) == 0){
+      func_count++;
+    }
+
   }
 }
 
