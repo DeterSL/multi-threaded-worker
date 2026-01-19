@@ -141,7 +141,7 @@ int parse_and_load(const std::string& func_name)
   return 0;
 }
 
-int cleanup_resources()
+void cleanup_resources()
 {
   std::string res_name;
   while(!(res_name = deleted_resources_queue.pop()).empty()){
