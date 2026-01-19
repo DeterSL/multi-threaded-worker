@@ -14,7 +14,7 @@ namespace detersl {
         class WasmExecution {
             public:
                 explicit WasmExecution(DeterSLEngine& engine, detersl::kv::WasmExecEnvKV* kv) :
-                    exec_(new_executioner(engine, new_cpp_kv(kv))) {
+                    exec_(new_executioner(engine, new_cpp_kv(kv))), kv_(kv) {
                 }
 
 
@@ -27,8 +27,17 @@ namespace detersl {
                     //func.set_output(out);
                 }
 
+                detersl::kv::WasmExecEnvKV* get_kv() {
+                    return kv_;
+                }
+
+                ~WasmExecution() {
+                        delete kv_;
+                    }
+
             private:
                 rust::Box<FfiExecutioner> exec_;
+                detersl::kv::WasmExecEnvKV* kv_;
         };
     }
 }

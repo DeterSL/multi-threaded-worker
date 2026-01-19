@@ -17,7 +17,6 @@ namespace detersl {
     namespace runner {
 
         inline thread_local executioner::WasmExecution* worker_excutioner = nullptr;
-        inline thread_local kv::WasmExecEnvKV* wasm_kv = nullptr;
 
         class WasmRunner : public Runner {
             public:
@@ -28,11 +27,10 @@ namespace detersl {
                         if (!worker_excutioner) {
                             // Threre is no executioner on this thread.
                             // Lets make it
-                            wasm_kv = new kv::WasmExecEnvKV();
-                            worker_excutioner = new executioner::WasmExecution(*engine, wasm_kv);
+                            worker_excutioner = new executioner::WasmExecution(*engine, new kv::WasmExecEnvKV());
                         }
 
-                        wasm_kv->reinitialize(std::move(storage));
+                        worker_excutioner->get_kv()->reinitialize(std::move(storage));
                     }
 
                 WasmRunner(acquired_cown_span<detersl::types::Resource> cown_arr,
@@ -44,11 +42,10 @@ namespace detersl {
                         if (!worker_excutioner) {
                             // Threre is no executioner on this thread.
                             // Lets make it
-                            wasm_kv = new kv::WasmExecEnvKV();
-                            worker_excutioner = new executioner::WasmExecution(*engine, wasm_kv);
+                            worker_excutioner = new executioner::WasmExecution(*engine, new kv::WasmExecEnvKV());
                         }
 
-                        wasm_kv->reinitialize(std::move(storage));
+                        worker_excutioner->get_kv()->reinitialize(std::move(storage));
                     }
 
                 WasmRunner(const WasmRunner&) = delete;
@@ -70,7 +67,7 @@ namespace detersl {
                     // Bring back storage.
                     // The reason why we did not use shared ptr is that
                     // it is too slow for fast allocation and deallocation in a high dynamic env.
-                    storage = std::move(wasm_kv->move_resource_storage_out());
+                    storage = std::move(worker_excutioner->get_kv()->move_resource_storage_out());
                 }
 
                 ~WasmRunner() = default;

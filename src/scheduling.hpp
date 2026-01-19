@@ -22,10 +22,5 @@ void hardcoded_test();
 
 void register_function(const std::string& name, detersl::types::FunctionType fn);
 
-void clear_state_for_tests();
-
-size_t resource_count_for_tests();
-
-cown_ptr<detersl::types::Resource> get_cown_for_resource(const std::string& name);
-
+void cleanup_resources();
 } // namespace detersl::worker

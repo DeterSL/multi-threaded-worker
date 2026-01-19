@@ -189,34 +189,4 @@ void register_and_schedule()
   }
 }
 
-void hardcoded_test()
-{
-  //parse_and_load("matmul");
-  //parse_and_load("matmul");
-  // parse_and_load_cpp("print_input");
-  // parse_and_load_cpp("access_cowns");
-  // parse_and_load_cpp("access_cowns");
-}
-
-void clear_state_for_tests()
-{
-  all_functions.clear();
-  resource_map.clear();
-}
-
-size_t resource_count_for_tests()
-{
-  return resource_map.size();
-}
-
-cown_ptr<detersl::types::Resource> get_cown_for_resource(const std::string& name)
-{
-  auto it = resource_map.find(name);
-  if (it == resource_map.end())
-  {
-    return {};
-  }
-  return it->second;
-}
-
 } // namespace detersl::worker
