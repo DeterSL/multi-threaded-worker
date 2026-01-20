@@ -1,6 +1,6 @@
 #include <iostream>
 #include "ffi.rs.h"
-#include "scheduling.hpp"
+#include "http-server.hpp"
 #include "wasm-executioner.hpp"
 
 using namespace verona::rt;
@@ -22,7 +22,7 @@ int main(int argc, char **argv)
     Scheduler::add_external_event_source();
     
     //std::thread t(register_and_schedule);
-    std::thread t(detersl::worker::register_and_schedule);
+    std::thread t(detersl::server::register_and_schedule_json);
     t.detach();
   };
 

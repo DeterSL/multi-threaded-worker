@@ -28,6 +28,13 @@ message(STATUS "OPENSSL_INCLUDE_DIR = ${OPENSSL_INCLUDE_DIR}")
 message(STATUS "OPENSSL_SSL_LIBRARY = ${OPENSSL_SSL_LIBRARY}")
 message(STATUS "OPENSSL_CRYPTO_LIBRARY = ${OPENSSL_CRYPTO_LIBRARY}")
 
+FetchContent_Declare(
+    cpp_httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG        v0.15.3
+)
+FetchContent_MakeAvailable(cpp_httplib)
+
 # ------------------------------------------------------------
 # Shared header dependencies (Verona, snmalloc, etc)
 # ------------------------------------------------------------
@@ -73,6 +80,7 @@ add_library(detersl_worker_core STATIC
 target_link_libraries(detersl_worker_core PUBLIC
     detersl_common
     nlohmann_json::nlohmann_json
+    httplib::httplib
 )
 
 target_include_directories(detersl_worker_core PUBLIC
