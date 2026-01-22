@@ -3,6 +3,8 @@
 #include <cpp/when.h>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <stdexcept>
 #include "resource.hpp"
 
 namespace detersl {
@@ -10,11 +12,15 @@ namespace detersl {
 
         class ResourceStorage {
             public:
-                ResourceStorage(std::unordered_map<std::string, detersl::types::Resource*>& resources_to_manage) :
-                    local_resources_(resources_to_manage) {}
+                ResourceStorage(std::unordered_map<std::string, detersl::types::Resource*>& resources_to_manage,
+                    std::unordered_set<std::string> read_only_resources = {}) :
+                    local_resources_(resources_to_manage),
+                    read_only_resources_(std::move(read_only_resources)) {}
 
-                ResourceStorage(std::unordered_map<std::string, detersl::types::Resource*>&& resources_to_manage) : 
-                    local_resources_(std::move(resources_to_manage)) {}
+                ResourceStorage(std::unordered_map<std::string, detersl::types::Resource*>&& resources_to_manage,
+                    std::unordered_set<std::string> read_only_resources = {}) : 
+                    local_resources_(std::move(resources_to_manage)),
+                    read_only_resources_(std::move(read_only_resources)) {}
 
                 // TODO: Is it good idea to return the ptr?
                 virtual detersl::types::Resource* get_resource(const std::string& key) {
@@ -34,6 +40,10 @@ namespace detersl {
                         assert(false);
                         return;
                     }
+                    if (is_read_only(key)) {
+                        std::cerr << "Trying to write to a read-only resource: " << key << std::endl;
+                        return;
+                    }
                     local_resources_[key]->set_data(std::move(data));
                 }
 
@@ -42,8 +52,13 @@ namespace detersl {
                         return;
                     }
 
+                    if (is_read_only(key)) {
+                        std::cerr << "Trying to delete a read-only resource: " << key << std::endl;
+                        return;
+                    }
                     local_resources_[key]->mark_deleted();
                     local_resources_.erase(key);
+                    
                 }
 
                 ~ResourceStorage() {
@@ -51,7 +66,12 @@ namespace detersl {
                 }
 
             private:
+                inline bool is_read_only(const std::string& key) const {
+                    return read_only_resources_.count(key) != 0;
+                }
+
                 std::unordered_map<std::string, detersl::types::Resource*> local_resources_;
+                std::unordered_set<std::string> read_only_resources_;
         };
     }
 }

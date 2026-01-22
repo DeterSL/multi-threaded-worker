@@ -12,7 +12,8 @@ namespace detersl {
     namespace runner {
         class Runner {
             public:
-                Runner(acquired_cown_span<detersl::types::Resource> cown_arr, detersl::func::BasicFuncInfo basic_func);
+                Runner(acquired_cown_span<detersl::types::Resource> rw_cown_arr,
+                    acquired_cown_span<const detersl::types::Resource> ro_cown_arr, detersl::func::BasicFuncInfo basic_func);
 
                 std::vector<std::string> get_deleted_resources();
 

@@ -19,6 +19,9 @@ namespace detersl {
                 explicit Resource(detersl::types::Bytes&& data) : data_(std::move(data))
                 {}
 
+                explicit Resource(std::vector<uint8_t>&& data) : data_(std::move(data))
+                {}
+
 
                 detersl::types::Bytes& get_data() {
                     return data_;

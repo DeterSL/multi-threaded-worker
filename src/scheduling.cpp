@@ -11,6 +11,7 @@
 #include "wasm-func.hpp"
 #include "wasm-runner.hpp"
 #include "thread-safe-queue.hpp"
+#include <chrono>
 
 #include <nlohmann/json.hpp>
 
@@ -30,43 +31,64 @@ void register_function(const std::string& name, detersl::types::FunctionType fn)
 
 void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::WasmFunc func)
 {
-  size_t num_res = func_info.resources.size();
+  const size_t num_res = func_info.resources.size();
+  const size_t num_ro_res = func_info.read_only_resources.size();
+  const size_t num_rw_res = num_res - num_ro_res;
 
-  cown_ptr<detersl::types::Resource>* resource_array = new cown_ptr<detersl::types::Resource>[num_res];
-  for (size_t i = 0; i < func_info.resources.size(); i++)
-  {
-    auto res_name = func_info.resources[i];
+  cown_ptr<detersl::types::Resource> read_write_resources[num_rw_res];
+  cown_ptr<detersl::types::Resource> read_only_resources[num_ro_res];
+  size_t ro_index = 0;
+  size_t rw_index = 0;
+
+  for(auto & res_name : func_info.resources){
     if (resource_map.find(res_name) == resource_map.end())
     {
       std::cout << "Creating new cown for resource: " << res_name << std::endl;
       resource_map[res_name] = make_cown<detersl::types::Resource>();
     }
-    resource_array[i] = resource_map[res_name];
+    if(func_info.read_only_resources.find(res_name) != func_info.read_only_resources.end()){
+      read_only_resources[ro_index++] = resource_map[res_name];
+    }
+    else{
+      read_write_resources[rw_index++] = resource_map[res_name];
+    }
   }
 
-  cown_array<detersl::types::Resource> cowns{resource_array, num_res};
-  delete[] resource_array;
+  cown_array<detersl::types::Resource> rw_cowns{read_write_resources, num_rw_res};
+  cown_array<detersl::types::Resource> ro_cowns{read_only_resources, num_ro_res};
 
-  when(cowns) << [func_info, func](auto c) {
-    for (size_t i = 0; i < func_info.resources.size(); i++)
-    {
-      auto& resource = *c.array[i];
-      if (resource.is_deleted())
-      {
-        std::cout << "Skipping function because resource is marked for deletion: " << func_info.resources[i] << std::endl;
+  when(rw_cowns, read(ro_cowns)) << [func_info, func](auto rw_c, auto ro_c) {
+    std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
+
+    for(int i = 0; i < rw_c.length; i++) {
+      if(rw_c.array[i]->is_deleted()) {
+        std::cerr << "Error: Function " << func_info.func_name 
+                  << " tried to access deleted resource." << std::endl;
+        return;
+      }
+    }
+    for(int i = 0; i < ro_c.length; i++) {
+      if(ro_c.array[i]->is_deleted()) {
+        std::cerr << "Error: Function " << func_info.func_name 
+                  << " tried to access deleted resource." << std::endl;
         return;
       }
     }
     
-    detersl::runner::WasmRunner runner(c, func_info, func);
+    detersl::runner::WasmRunner runner(rw_c, ro_c, func_info, func);
 
     // TODO: maybe a return code of funciton?
     // Like previous version
     runner.run();
+    
 
     for (const auto& res_name : runner.get_deleted_resources()) {
       deleted_resources_queue.push(res_name);
     }
+    std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+    std::cout << "Function " << func_info.func_name << " executed in " << duration << " ms\n";
   };
 }
 

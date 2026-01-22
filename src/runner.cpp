@@ -9,12 +9,22 @@ using namespace verona::rt;
 using namespace verona::cpp;
 
 namespace detersl::runner {
-   
-    Runner::Runner(acquired_cown_span<detersl::types::Resource> cown_arr,
+
+    Runner::Runner(acquired_cown_span<detersl::types::Resource> rw_cown_arr,
+            acquired_cown_span<const detersl::types::Resource> ro_cown_arr,
             detersl::func::BasicFuncInfo basic_func) : func_info_(basic_func) {
         std::unordered_map<std::string, detersl::types::Resource*> local_resources;
-        for (size_t i = 0; i < func_info_.resources.size(); i++) {
-            local_resources[func_info_.resources[i]] = &(*cown_arr.array[i]);
+        for (auto &res_name : func_info_.resources) {
+            size_t ro_index = 0;
+            size_t rw_index = 0;
+            if(func_info_.read_only_resources.find(res_name) != func_info_.read_only_resources.end()){
+                // This is a read-only resource
+                local_resources[res_name] = const_cast<detersl::types::Resource*>(&(*ro_cown_arr.array[ro_index++]));
+            }
+            else{
+                // This is a read-write resource
+                local_resources[res_name] = &(*rw_cown_arr.array[rw_index++]);
+            }
         }
 
         if (cur_runner != nullptr) {
@@ -23,7 +33,8 @@ namespace detersl::runner {
             assert(false);
         }
             
-        storage = std::make_unique<detersl::kv::ResourceStorage>(std::move(local_resources));
+        storage = std::make_unique<detersl::kv::ResourceStorage>(std::move(local_resources),  
+            func_info_.read_only_resources);
         std::cout << "Runner created in thread: " << std::this_thread::get_id() << "\n";
         cur_runner = this;
     }
@@ -39,7 +50,6 @@ namespace detersl::runner {
     }
 
     Runner::~Runner() {
-        std::cout << "Runner destroyed at " << this << std::endl;
         cur_runner = nullptr;
     }  
 }

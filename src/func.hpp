@@ -4,6 +4,7 @@
 #include <vector>
 #include <stdexcept>
 #include <nlohmann/json.hpp>
+#include <unordered_set>
 
 namespace detersl::func {
 
@@ -18,6 +19,7 @@ struct BasicFuncInfo {
     std::string func_name;
     std::string func_invocation_id;
     std::vector<std::string> resources;
+    std::unordered_set<std::string> read_only_resources;
     bool started;
     bool finished;
 
@@ -31,6 +33,7 @@ struct BasicFuncInfo {
         info.func_name = j.at("func_name").get<std::string>();
         info.func_invocation_id = j.value("func_invocation_id", "no id");
         info.resources = j.value("resources", std::vector<std::string>{});
+        info.read_only_resources = j.value("read_only_resources", std::unordered_set<std::string>{});
         info.started   = j.value("started", false);
         info.finished  = j.value("finished", false);
 

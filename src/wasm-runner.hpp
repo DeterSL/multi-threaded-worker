@@ -20,10 +20,12 @@ namespace detersl {
 
         class WasmRunner : public Runner {
             public:
-                WasmRunner(acquired_cown_span<detersl::types::Resource> cown_arr, detersl::func::WasmFuncInfo func_info) : 
+                WasmRunner(acquired_cown_span<detersl::types::Resource> rw_cown_arr,
+                    acquired_cown_span<const detersl::types::Resource> ro_cown_arr,
+                    detersl::func::WasmFuncInfo func_info) : 
                     func_info_(func_info),
                     func_(func_info),
-                    Runner(cown_arr, func_info) {
+                    Runner(rw_cown_arr, ro_cown_arr, func_info) {
                         if (!worker_excutioner) {
                             // Threre is no executioner on this thread.
                             // Lets make it
@@ -33,12 +35,13 @@ namespace detersl {
                         worker_excutioner->get_kv()->reinitialize(std::move(storage));
                     }
 
-                WasmRunner(acquired_cown_span<detersl::types::Resource> cown_arr,
+                WasmRunner(acquired_cown_span<detersl::types::Resource> rw_cown_arr,
+                        acquired_cown_span<const detersl::types::Resource> ro_cown_arr,
                         detersl::func::WasmFuncInfo func_info,
                         detersl::func::WasmFunc func) : 
                     func_info_(func_info),
                     func_(func),
-                    Runner(cown_arr, func_info) {
+                    Runner(rw_cown_arr, ro_cown_arr, func_info) {
                         if (!worker_excutioner) {
                             // Threre is no executioner on this thread.
                             // Lets make it
