@@ -56,9 +56,8 @@ namespace detersl {
                         std::cerr << "Trying to delete a read-only resource: " << key << std::endl;
                         return;
                     }
-                    local_resources_[key]->mark_deleted();
+                    local_resources_[key]->free_data();
                     local_resources_.erase(key);
-                    
                 }
 
                 ~ResourceStorage() {

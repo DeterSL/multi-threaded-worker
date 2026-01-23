@@ -7,6 +7,7 @@
 #include "wasm-kv.hpp"
 #include <verona.h>
 #include <cpp/when.h>
+#include <chrono>
 
 using namespace verona::rt;
 using namespace verona::cpp;
@@ -62,7 +63,13 @@ namespace detersl {
 
                 void run() override {
                     try{
+                        std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
+                    
                         worker_excutioner->execution_func(func_);
+
+                        std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
+                        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+                        std::cout << "Function " << func_info_.func_name << " executed in " << duration << " ms\n";
                     } catch (const std::exception& e) {
                         std::cerr << "Exception during WasmRunner run: " << e.what() << std::endl;
                     }

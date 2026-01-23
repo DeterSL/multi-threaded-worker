@@ -11,7 +11,6 @@
 #include "wasm-func.hpp"
 #include "wasm-runner.hpp"
 #include "thread-safe-queue.hpp"
-#include <chrono>
 
 #include <nlohmann/json.hpp>
 
@@ -20,8 +19,8 @@ using json = nlohmann::json;
 namespace detersl::worker {
 
 std::unordered_map<std::string, detersl::types::FunctionType> all_functions;
-std::unordered_map<std::string, cown_ptr<detersl::types::Resource>> resource_map;
-BasicMPSCQueue<std::string> deleted_resources_queue;
+std::unordered_map<std::string, std::pair<cown_ptr<detersl::types::Resource>, uint64_t>> resource_map;
+BasicMPSCQueue<std::pair<std::string, uint64_t>> deleted_resources_queue;
 
 // namespace detersl::worker
 void register_function(const std::string& name, detersl::types::FunctionType fn)
@@ -34,6 +33,7 @@ void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::Was
   const size_t num_res = func_info.resources.size();
   const size_t num_ro_res = func_info.read_only_resources.size();
   const size_t num_rw_res = num_res - num_ro_res;
+  std::unordered_map<std::string, uint64_t> local_ref_counts;
 
   cown_ptr<detersl::types::Resource> read_write_resources[num_rw_res];
   cown_ptr<detersl::types::Resource> read_only_resources[num_ro_res];
@@ -44,37 +44,23 @@ void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::Was
     if (resource_map.find(res_name) == resource_map.end())
     {
       std::cout << "Creating new cown for resource: " << res_name << std::endl;
-      resource_map[res_name] = make_cown<detersl::types::Resource>();
+      resource_map[res_name] = std::make_pair(make_cown<detersl::types::Resource>(), 0);
     }
+
     if(func_info.read_only_resources.find(res_name) != func_info.read_only_resources.end()){
-      read_only_resources[ro_index++] = resource_map[res_name];
+      read_only_resources[ro_index++] = resource_map[res_name].first;
     }
     else{
-      read_write_resources[rw_index++] = resource_map[res_name];
+      read_write_resources[rw_index++] = resource_map[res_name].first;
     }
+    resource_map[res_name].second++; // increment ref count
+    local_ref_counts[res_name] = resource_map[res_name].second;
   }
 
   cown_array<detersl::types::Resource> rw_cowns{read_write_resources, num_rw_res};
   cown_array<detersl::types::Resource> ro_cowns{read_only_resources, num_ro_res};
 
-  when(rw_cowns, read(ro_cowns)) << [func_info, func](auto rw_c, auto ro_c) {
-    std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
-
-    for(int i = 0; i < rw_c.length; i++) {
-      if(rw_c.array[i]->is_deleted()) {
-        std::cerr << "Error: Function " << func_info.func_name 
-                  << " tried to access deleted resource." << std::endl;
-        return;
-      }
-    }
-    for(int i = 0; i < ro_c.length; i++) {
-      if(ro_c.array[i]->is_deleted()) {
-        std::cerr << "Error: Function " << func_info.func_name 
-                  << " tried to access deleted resource." << std::endl;
-        return;
-      }
-    }
-    
+  when(rw_cowns, read(ro_cowns)) << [func_info, func, local_ref_counts](auto rw_c, auto ro_c) {  
     detersl::runner::WasmRunner runner(rw_c, ro_c, func_info, func);
 
     // TODO: maybe a return code of funciton?
@@ -83,12 +69,8 @@ void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::Was
     
 
     for (const auto& res_name : runner.get_deleted_resources()) {
-      deleted_resources_queue.push(res_name);
+      deleted_resources_queue.push({res_name, local_ref_counts.at(res_name)});
     }
-    std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-
-    std::cout << "Function " << func_info.func_name << " executed in " << duration << " ms\n";
   };
 }
 
@@ -165,11 +147,10 @@ int parse_and_load(const std::string& func_name)
 
 void cleanup_resources()
 {
-  std::string res_name;
-  while(!(res_name = deleted_resources_queue.pop()).empty()){
-    std::cout << "Deleting resource: " << res_name << std::endl;
-    auto it = resource_map.find(res_name);
-    if (it != resource_map.end())
+  std::pair<std::string, uint64_t> res;
+  while(!((res = deleted_resources_queue.pop()).first).empty()){
+    auto it = resource_map.find(res.first);
+    if (it != resource_map.end() && it->second.second == res.second)
     {
       resource_map.erase(it);
     }

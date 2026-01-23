@@ -57,6 +57,10 @@ namespace detersl {
                 return *this;
             }
 
+            void clear() {
+                data_.clear();
+            }
+
             ~BaseBytes() {};
 
             std::vector<uint8_t, Alloc>& as_vec() {
