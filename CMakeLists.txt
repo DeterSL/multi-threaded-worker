@@ -75,6 +75,7 @@ target_link_libraries(detersl_common INTERFACE
 add_library(detersl_worker_core STATIC
     src/runner.cpp
     src/scheduling.cpp
+    src/graph.cpp
 )
 
 target_link_libraries(detersl_worker_core PUBLIC

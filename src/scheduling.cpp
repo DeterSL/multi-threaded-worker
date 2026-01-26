@@ -11,6 +11,7 @@
 #include "wasm-func.hpp"
 #include "wasm-runner.hpp"
 #include "thread-safe-queue.hpp"
+#include "graph.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -190,6 +191,55 @@ void register_and_schedule()
     }
 
   }
+}
+
+std::string runNode(Node* node) {
+  if (!node) return {};
+
+  std::string nextInput;
+
+  const std::string type = node->Type;
+  std::string typeLower = type;
+  std::transform(typeLower.begin(), typeLower.end(), typeLower.begin(), ::tolower);
+
+  if (typeLower == "pass") {
+      const std::string res = node->Result;
+      std::string err;
+      if (Advance(&node, &err) != 0) {
+          return {};
+      }
+      if (!node) return res;
+      nextInput = res;
+  } else if (typeLower == "task") {
+      bool ok = false;
+      const std::string res;
+      // TODO: implement runTask for WASM and add resource dependencies between nodes
+      // res = runTask(node, &ok);
+      if (!ok) {
+          return {};
+      }
+      std::string err;
+      if (Advance(&node, &err) != 0) {
+          return {};
+      }
+      if (!node) return res;
+      nextInput = res;
+  } else if (typeLower == "choice") {
+      const std::string in = node->Input;
+      std::string err;
+      if (Advance(&node, &err) != 0) {
+          // on failure, return original input like Go for choice on error path
+          return in;
+      }
+      if (!node) return in;
+      nextInput = in;
+  } else {
+      // unknown node type
+      return {};
+  }
+
+  node->Input = nextInput;
+  return runNode(node);
 }
 
 } // namespace detersl::worker

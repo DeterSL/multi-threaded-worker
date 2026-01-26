@@ -1,0 +1,241 @@
+// src/worker/graph.cpp
+#include "graph.hpp"
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+
+namespace detersl::worker {
+
+using detersl::types::Workflow;
+using detersl::types::WorkflowRequest;
+using detersl::types::State;
+using detersl::types::Choice;
+
+static std::string lower(const std::string& s) {
+        std::string t = s;
+        std::transform(t.begin(), t.end(), t.begin(), ::tolower);
+        return t;
+    }
+
+    std::string Node::ID() const {
+        if (!Resource.empty()) return Type + ":" + Resource;
+        return Type;
+    }
+
+    static bool toOperandValue(const Choice& c, std::string& op, json& val, std::string& err) {
+        if (c.NumericEq) { op = "=="; val = *c.NumericEq; return true; }
+        if (c.NumericGT) { op = ">";  val = *c.NumericGT; return true; }
+        if (c.NumericGTE){ op = ">="; val = *c.NumericGTE; return true; }
+        if (c.NumericLT) { op = "<";  val = *c.NumericLT; return true; }
+        if (c.NumericLTE){ op = "<="; val = *c.NumericLTE; return true; }
+        if (c.StringEq)  { op = "=="; val = *c.StringEq; return true; }
+        if (c.BoolEq)    { op = "bool"; val = *c.BoolEq; return true; }
+        err = "no comparator set in choice rule";
+        return false;
+    }
+
+    static Node* buildGraph(const std::string& key, const Workflow& wf, const std::string& reqID,
+                            std::map<std::string, Node*>& cache, std::string* err) {
+        if (auto it = cache.find(key); it != cache.end()) return it->second;
+        auto it = wf.States.find(key);
+        if (it == wf.States.end()) {
+            if (err) *err = "dangling reference to state \"" + key + "\"";
+            return nullptr;
+        }
+        const State& st = it->second;
+        Node* n = new Node{
+            .RequestID = reqID,
+            .Type = st.Type,
+            .Resource = st.Resource,
+            .DataAccess = st.DataAccess,
+            .End = st.End,
+            .Input = "",
+            .Result = st.Result.is_null() ? std::string{} : st.Result.dump(), // <--- FIX
+            .Next = nullptr,
+            .Choices = {},
+            .RuntimeBase = st.RuntimeBase
+        };
+        cache[key] = n;
+
+        const std::string t = lower(st.Type);
+        if (t == "task" || t == "pass") {
+            if (!st.Next.empty()) {
+                Node* child = buildGraph(st.Next, wf, reqID, cache, err);
+                if (!child) return nullptr;
+                n->Next = child;
+            }
+        } else if (t == "choice") {
+            std::vector<ChoiceEdge> edges;
+            edges.reserve(st.Choices.size() + 1);
+            for (const auto& c : st.Choices) {
+                if (c.Variable.empty()) {
+                    if (err) *err = "choice \"" + key + "\" rule missing variable";
+                    return nullptr;
+                }
+                std::string op; json val;
+                std::string terr;
+                if (!toOperandValue(c, op, val, terr)) {
+                    if (err) *err = "choice \"" + key + "\": " + terr;
+                    return nullptr;
+                }
+                Node* child = buildGraph(c.Next, wf, reqID, cache, err);
+                if (!child) return nullptr;
+
+                edges.push_back(ChoiceEdge{c.Variable, op, val, child});
+            }
+            if (!st.Default.empty()) {
+                Node* child = buildGraph(st.Default, wf, reqID, cache, err);
+                if (!child) return nullptr;
+                edges.push_back(ChoiceEdge{"","default",nullptr, child});
+            }
+
+            // Deterministic sorting like Go: by Next.ID(), then Variable, then Operand.
+            std::sort(edges.begin(), edges.end(), [](const ChoiceEdge& a, const ChoiceEdge& b){
+                const std::string idi = a.Next ? a.Next->ID() : "";
+                const std::string idj = b.Next ? b.Next->ID() : "";
+                if (idi == idj) {
+                    if (a.Variable == b.Variable) return a.Operand < b.Operand;
+                    return a.Variable < b.Variable;
+                }
+                return idi < idj;
+            });
+            n->Choices = std::move(edges);
+        } else {
+            if (err) *err = "unknown choice type \"" + st.Type + "\"";
+            return nullptr;
+        }
+        return n;
+    }
+
+    Node* BuildFromWorkflow(const WorkflowRequest& request, std::string* err) {
+        std::map<std::string, Node*> cache;
+        Node* root = buildGraph(request.Workflow.StartAt, request.Workflow, request.RequestID, cache, err);
+        if (!root) {
+            if (err) *err = "faild to build graph: " + *err;
+            return nullptr;
+        }
+        root->Input = request.Input;
+        return root;
+    }
+
+    static bool asNumber(const json& v, double* out) {
+        if (v.is_number_float()) { *out = v.get<double>(); return true; }
+        if (v.is_number_integer()) { *out = static_cast<double>(v.get<long long>()); return true; }
+        if (v.is_string()) { try { *out = std::stod(v.get<std::string>()); return true; } catch(...){} }
+        return false;
+    }
+
+    bool cmp(const json& actual, const std::string& operand, const json& rhs, bool* match) {
+        if (operand == "==" || operand == "eq") {
+            if (rhs.is_string()) { *match = actual.is_string() && actual.get<std::string>() == rhs.get<std::string>(); return true; }
+            if (rhs.is_boolean()) { *match = actual.is_boolean() && actual.get<bool>() == rhs.get<bool>(); return true; }
+            double af, rf;
+            bool aok = asNumber(actual, &af), rok = asNumber(rhs, &rf);
+            *match = aok && rok && (af == rf);
+            return true;
+        } else if (operand == "!=") {
+            if (rhs.is_string()) { *match = actual.is_string() && actual.get<std::string>() != rhs.get<std::string>(); return true; }
+            if (rhs.is_boolean()) { *match = actual.is_boolean() && actual.get<bool>() != rhs.get<bool>(); return true; }
+            double af, rf;
+            bool aok = asNumber(actual, &af), rok = asNumber(rhs, &rf);
+            *match = aok && rok && (af != rf);
+            return true;
+        } else if (operand == ">" || operand == ">=" || operand == "<" || operand == "<=") {
+            double af, rf;
+            bool aok = asNumber(actual, &af), rok = asNumber(rhs, &rf);
+            *match = false;
+            if (!aok || !rok) return true; // not comparable => false
+            if (operand == ">")  *match = af > rf;
+            if (operand == ">=") *match = af >= rf;
+            if (operand == "<")  *match = af < rf;
+            if (operand == "<=") *match = af <= rf;
+            return true;
+        } else if (operand == "bool") {
+            if (!rhs.is_boolean()) return false;
+            *match = actual.is_boolean() && actual.get<bool>() == rhs.get<bool>();
+            return true;
+        } else if (operand == "default") {
+            *match = true;
+            return true;
+        }
+        return false;
+    }
+
+    bool readByPath(const json& input, const std::string& path, json* out) {
+        std::string p = path;
+        // Trim
+        p.erase(p.begin(), std::find_if(p.begin(), p.end(), [](unsigned char c){ return !std::isspace(c);} ));
+        p.erase(std::find_if(p.rbegin(), p.rend(), [](unsigned char c){ return !std::isspace(c);}).base(), p.end());
+
+        if (p.empty() || p == "$") { *out = input; return true; }
+        if (p.rfind("$.", 0) != 0) return false;
+
+        const std::string rest = p.substr(2);
+        auto parts = std::vector<std::string>{};
+        size_t start = 0, pos;
+        while ((pos = rest.find('.', start)) != std::string::npos) {
+            parts.emplace_back(rest.substr(start, pos - start));
+            start = pos + 1;
+        }
+        parts.emplace_back(rest.substr(start));
+
+        json cur = input;
+        for (const auto& seg : parts) {
+            if (!cur.is_object()) return false;
+            if (!cur.contains(seg)) return false;
+            cur = cur[seg];
+        }
+        *out = cur;
+        return true;
+    }
+
+    int Advance(Node** root, std::string* err) {
+        if (!root || !*root) return 0;
+        Node* n = *root;
+        const std::string t = lower(n->Type);
+
+        if (t == "task" || t == "pass") {
+            if (n->End) {
+                *root = nullptr;
+                return 0;
+            }
+            if (n->Next == nullptr) {
+                if (err) *err = "node has no Next and End=false";
+                return -1;
+            }
+            *root = n->Next;
+            return 0;
+        } else if (t == "choice") {
+            json typed;
+            if (!n->Input.empty()) {
+                try {
+                    typed = json::parse(n->Input);
+                } catch (...) {
+                    // ignore parse errors; act as nil
+                }
+            }
+            Node* def = nullptr;
+            for (const auto& e : n->Choices) {
+                if (e.Operand == "default") { def = e.Next; continue; }
+                json val;
+                if (!readByPath(typed, e.Variable, &val)) continue;
+                bool match = false;
+                if (!cmp(val, e.Operand, e.Value, &match)) {
+                    if (err) *err = "unsupported operand \"" + e.Operand + "\"";
+                    return -1;
+                }
+                if (match && e.Next) {
+                    *root = e.Next;
+                    return 0;
+                }
+            }
+            if (def) { *root = def; return 0; }
+            if (err) *err = "choice: no rule matched and no default";
+            return -1;
+        }
+        if (err) *err = "unknown node type \"" + n->Type + "\"";
+        return -1;
+    }
+
+
+} // namespace detersl::worker
