@@ -17,19 +17,6 @@ using json = nlohmann::json;
 
 namespace detersl::server {
     
-bool parse_and_schedule_json(const nlohmann::json& j, std::string& error)
-{
-  try {
-    detersl::func::WasmFuncInfo f = detersl::func::WasmFuncInfo::from_json(j);
-    detersl::func::WasmFunc func(f);
-    detersl::worker::schedule_function(f, func);
-    return true;
-  } catch (const std::exception& e) {
-    error = e.what();
-    return false;
-  }
-}
-
 void register_and_schedule_json(){
     const int delete_after_n_func = 3;
     int func_count = 0;
@@ -59,19 +46,52 @@ void register_and_schedule_json(){
             detersl::worker::cleanup_resources();
         }
 
-        bool scheduled = parse_and_schedule_json(j, error);
-        if (scheduled) {
-            func_count++;
+        int func_id = 0;
+        if (detersl::worker::register_wasm_function(j, &error, &func_id) != 0) {
+            res.status = 400;
+            res.set_content(std::string("Failed to register WASM function: ") + error + "\n", "text/plain");
+            return;
         }
 
-        if (!scheduled) {
+        func_count++;
+        res.status = 201;
+        res.set_content("Registered func_id: " + std::to_string(func_id) + "\n", "text/plain");
+    });
+
+    server.Post("/workflow", [&](const httplib::Request& req, httplib::Response& res) {
+        if (req.body.empty()) {
             res.status = 400;
-            res.set_content(std::string("Failed to schedule WASM function: ") + error + "\n", "text/plain");
+            res.set_content("Missing JSON body.\n", "text/plain");
+            return;
+        }
+
+        nlohmann::json j;
+        try {
+            j = nlohmann::json::parse(req.body);
+        } catch (const nlohmann::json::parse_error& e) {
+            res.status = 400;
+            res.set_content(std::string("JSON parse error: ") + e.what() + "\n", "text/plain");
+            return;
+        }
+
+        std::string error;
+        detersl::types::WorkflowRequest request;
+        try {
+            request = j.get<detersl::types::WorkflowRequest>();
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content(std::string("Invalid workflow request: ") + e.what() + "\n", "text/plain");
+            return;
+        }
+
+        if (!detersl::worker::schedule_workflow(request, &error)) {
+            res.status = 400;
+            res.set_content(std::string("Failed to schedule workflow: ") + error + "\n", "text/plain");
             return;
         }
 
         res.status = 202;
-        res.set_content("Scheduled.\n", "text/plain");
+        res.set_content("Workflow scheduled.\n", "text/plain");
     });
 
     std::cout << "Listening for WASM configs on http://0.0.0.0:6666\n";

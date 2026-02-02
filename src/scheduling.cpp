@@ -1,6 +1,8 @@
 #include "scheduling.hpp"
 
 #include <dlfcn.h>
+#include <cctype>
+#include <unordered_set>
 #include <fstream>
 #include "basic-net.hpp"
 #include "cpp-func.hpp"
@@ -22,11 +24,171 @@ namespace detersl::worker {
 std::unordered_map<std::string, detersl::types::FunctionType> all_functions;
 std::unordered_map<std::string, std::pair<cown_ptr<detersl::types::Resource>, uint64_t>> resource_map;
 BasicMPSCQueue<std::pair<std::string, uint64_t>> deleted_resources_queue;
+std::unordered_map<int, detersl::func::WasmFuncInfo> wasm_func_registry;
+int next_wasm_func_id = 1;
 
 // namespace detersl::worker
 void register_function(const std::string& name, detersl::types::FunctionType fn)
 {
   all_functions[name] = fn;
+}
+
+static std::string trim_copy(std::string input) {
+  const auto not_space = [](unsigned char c) { return !std::isspace(c); };
+  input.erase(input.begin(), std::find_if(input.begin(), input.end(), not_space));
+  input.erase(std::find_if(input.rbegin(), input.rend(), not_space).base(), input.end());
+  return input;
+}
+
+static bool parse_resource_placeholder(const std::string& placeholder,
+                                       char* scope,
+                                       std::string* name,
+                                       char* mode,
+                                       std::string* err) {
+  const auto trimmed = trim_copy(placeholder);
+  if (trimmed.size() < 3 || trimmed[1] != '.') {
+    if (err) *err = "invalid resource placeholder: " + placeholder;
+    return false;
+  }
+  const char scope_char = trimmed[0];
+  if (scope_char != '$' && scope_char != '&') {
+    if (err) *err = "unsupported placeholder scope: " + placeholder;
+    return false;
+  }
+  const auto colon_pos = trimmed.rfind(':');
+  if (colon_pos == std::string::npos || colon_pos + 2 != trimmed.size()) {
+    if (err) *err = "missing access mode in placeholder: " + placeholder;
+    return false;
+  }
+  const char mode_char = trimmed[colon_pos + 1];
+  if (mode_char != 'r' && mode_char != 'w' && mode_char != 'v') {
+    if (err) *err = "unsupported access mode in placeholder: " + placeholder;
+    return false;
+  }
+  const std::string key = trimmed.substr(2, colon_pos - 2);
+  if (key.empty()) {
+    if (err) *err = "empty resource key in placeholder: " + placeholder;
+    return false;
+  }
+  if (scope) *scope = scope_char;
+  if (name) *name = key;
+  if (mode) *mode = mode_char;
+  return true;
+}
+
+static bool resolve_resources(const Node* node,
+                              const nlohmann::json& invocation_resources,
+                              std::unordered_map<std::string, std::string>* resolved,
+                              std::unordered_set<std::string>* read_only,
+                              std::unordered_map<std::string, std::string>* value_inputs,
+                              std::string* err) {
+  if (!node) {
+    if (err) *err = "missing task node";
+    return false;
+  }
+  if (!resolved || !read_only || !value_inputs) {
+    if (err) *err = "internal resource resolution error";
+    return false;
+  }
+  resolved->clear();
+  read_only->clear();
+  value_inputs->clear();
+
+  for (const auto& entry : node->Resources) {
+    char scope = 0;
+    char mode = 0;
+    std::string key;
+    std::string parse_err;
+    if (!parse_resource_placeholder(entry.second, &scope, &key, &mode, &parse_err)) {
+      if (err) *err = parse_err;
+      return false;
+    }
+
+    if (mode == 'v') {
+      if (!invocation_resources.contains(key)) {
+        if (err) *err = "missing value resource \"" + key + "\" in invocation";
+        return false;
+      }
+      (*value_inputs)[entry.first] = key;
+      continue;
+    }
+
+    std::string runtime_name;
+    if (scope == '$') {
+      if (!invocation_resources.contains(key)) {
+        if (err) *err = "missing resource \"" + key + "\" in invocation";
+        return false;
+      }
+      if (!invocation_resources.at(key).is_string()) {
+        if (err) *err = "resource \"" + key + "\" must map to a string";
+        return false;
+      }
+      runtime_name = invocation_resources.at(key).get<std::string>();
+    } else {
+      runtime_name = node->RequestID + ":" + key;
+    }
+
+    (*resolved)[entry.first] = runtime_name;
+    if (mode == 'r') {
+      read_only->insert(runtime_name);
+    } else if (mode == 'w') {
+      read_only->erase(runtime_name);
+    }
+  }
+  return true;
+}
+
+static bool run_task_node(Node* node,
+                          const nlohmann::json& invocation_resources,
+                          std::string* err) {
+  if (!node || !node->FuncID) {
+    if (err) *err = "task missing func_id";
+    return false;
+  }
+  auto it = wasm_func_registry.find(*node->FuncID);
+  if (it == wasm_func_registry.end()) {
+    if (err) *err = "unknown func_id " + std::to_string(*node->FuncID);
+    return false;
+  }
+
+  std::unordered_map<std::string, std::string> resolved;
+  std::unordered_set<std::string> read_only;
+  std::unordered_map<std::string, std::string> value_inputs;
+  if (!resolve_resources(node, invocation_resources, &resolved, &read_only, &value_inputs, err)) {
+    return false;
+  }
+
+  std::unordered_set<std::string> resource_names;
+  resource_names.reserve(resolved.size());
+  for (const auto& item : resolved) {
+    resource_names.insert(item.second);
+  }
+  std::vector<std::string> resources;
+  resources.reserve(resource_names.size());
+  for (const auto& name : resource_names) {
+    resources.push_back(name);
+  }
+
+  detersl::func::WasmFuncInfo func_info = it->second;
+  func_info.resources = resources;
+  func_info.read_only_resources = read_only;
+
+  nlohmann::json input_payload = nlohmann::json::object();
+  input_payload["resources"] = nlohmann::json::object();
+  input_payload["values"] = nlohmann::json::object();
+  for (const auto& item : resolved) {
+    input_payload["resources"][item.first] = item.second;
+  }
+  for (const auto& item : value_inputs) {
+    if (invocation_resources.contains(item.second)) {
+      input_payload["values"][item.first] = invocation_resources.at(item.second);
+    }
+  }
+  func_info.func_input_event.data = input_payload.dump();
+
+  detersl::func::WasmFunc func(func_info);
+  schedule_function(func_info, func);
+  return true;
 }
 
 void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::WasmFunc func)
@@ -156,6 +318,63 @@ void cleanup_resources()
       resource_map.erase(it);
     }
   }
+}
+
+int register_wasm_function(const nlohmann::json& j, std::string* err, int* func_id)
+{
+  try {
+    detersl::func::WasmFuncInfo info = detersl::func::WasmFuncInfo::from_json(j);
+    const int id = next_wasm_func_id++;
+    wasm_func_registry[id] = std::move(info);
+    if (func_id) *func_id = id;
+    return 0;
+  } catch (const std::exception& e) {
+    if (err) *err = e.what();
+    return -1;
+  }
+}
+
+bool schedule_workflow(const detersl::types::WorkflowRequest& request, std::string* err)
+{
+  Node* root = BuildFromWorkflow(request, err);
+  if (!root) return false;
+
+  nlohmann::json invocation;
+  try {
+    invocation = nlohmann::json::parse(request.Input);
+  } catch (const std::exception& e) {
+    if (err) *err = std::string("invalid workflow input: ") + e.what();
+    return false;
+  }
+
+  if (!invocation.is_object() || !invocation.contains("resources")) {
+    if (err) *err = "workflow input must include resources";
+    return false;
+  }
+
+  const auto& resources = invocation.at("resources");
+  if (!resources.is_object()) {
+    if (err) *err = "workflow resources must be an object";
+    return false;
+  }
+
+  Node* node = root;
+  while (node) {
+    std::string type_lower = node->Type;
+    std::transform(type_lower.begin(), type_lower.end(), type_lower.begin(), ::tolower);
+    if (type_lower == "task") {
+      if (!run_task_node(node, resources, err)) {
+        return false;
+      }
+    }
+    std::string adv_err;
+    if (Advance(&node, &adv_err) != 0) {
+      if (err) *err = adv_err;
+      return false;
+    }
+  }
+
+  return true;
 }
 
 void register_and_schedule()

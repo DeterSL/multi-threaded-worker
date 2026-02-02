@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <optional>
+#include <map>
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -24,6 +25,8 @@ namespace detersl::worker {
         std::string RequestID;
         std::string Type;
         std::string Resource;
+        std::optional<int> FuncID;
+        std::map<std::string, std::string> Resources;
         std::vector<detersl::types::DataAccess> DataAccess;
         bool End{false};
         std::string Input;   // raw JSON string
