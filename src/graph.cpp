@@ -47,6 +47,8 @@ static std::string lower(const std::string& s) {
             .RequestID = reqID,
             .Type = st.Type,
             .Resource = st.Resource,
+            .FuncID = st.FuncID,
+            .Resources = st.Resources,
             .DataAccess = st.DataAccess,
             .End = st.End,
             .Input = "",

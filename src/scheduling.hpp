@@ -1,6 +1,7 @@
 #pragma once
 
 #include "func.hpp"
+#include "graph.hpp"
 #include "resource.hpp"
 #include "runner.hpp"
 #include "types.hpp"
@@ -26,4 +27,7 @@ void hardcoded_test();
 void register_function(const std::string& name, detersl::types::FunctionType fn);
 
 void cleanup_resources();
+
+int register_wasm_function(const nlohmann::json& j, std::string* err, int* func_id);
+bool schedule_workflow(const detersl::types::WorkflowRequest& request, std::string* err);
 } // namespace detersl::worker
