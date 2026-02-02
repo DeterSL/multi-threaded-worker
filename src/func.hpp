@@ -52,6 +52,8 @@ struct BasicFuncInfo {
         nlohmann::json j;
         j["func_name"] = func_name;
         j["func_invocation_id"] = func_invocation_id;
+        j["resources"] = resources;
+        j["read_only_resources"] = read_only_resources;
 
         return j;
     }

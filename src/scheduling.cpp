@@ -109,7 +109,7 @@ static bool resolve_resources(const Node* node,
         if (err) *err = "missing value resource \"" + key + "\" in invocation";
         return false;
       }
-      (*value_inputs)[entry.first] = key;
+      (*value_inputs)[entry.first] = invocation_resources.at(key).get<std::string>();
       continue;
     }
 
@@ -131,9 +131,7 @@ static bool resolve_resources(const Node* node,
     (*resolved)[entry.first] = runtime_name;
     if (mode == 'r') {
       read_only->insert(runtime_name);
-    } else if (mode == 'w') {
-      read_only->erase(runtime_name);
-    }
+    } 
   }
   return true;
 }
@@ -180,9 +178,7 @@ static bool run_task_node(Node* node,
     input_payload["resources"][item.first] = item.second;
   }
   for (const auto& item : value_inputs) {
-    if (invocation_resources.contains(item.second)) {
-      input_payload["values"][item.first] = invocation_resources.at(item.second);
-    }
+    input_payload["values"][item.first] = item.second;
   }
   func_info.func_input_event.data = input_payload.dump();
 
