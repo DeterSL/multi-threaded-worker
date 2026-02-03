@@ -87,12 +87,13 @@ static bool resolve_resources(const Node* node,
                               std::unordered_map<std::string, std::string>* resolved,
                               std::unordered_set<std::string>* read_only,
                               std::unordered_map<std::string, std::string>* value_inputs,
+                              std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>* workflow_resources,
                               std::string* err) {
   if (!node) {
     if (err) *err = "missing task node";
     return false;
   }
-  if (!resolved || !read_only || !value_inputs) {
+  if (!resolved || !read_only || !value_inputs || !workflow_resources) {
     if (err) *err = "internal resource resolution error";
     return false;
   }
@@ -132,6 +133,9 @@ static bool resolve_resources(const Node* node,
       runtime_name = invocation_resources.at(key).get<std::string>();
     } else {
       runtime_name = request_id + ":" + key;
+      if (workflow_resources->find(runtime_name) == workflow_resources->end()) {
+        (*workflow_resources)[runtime_name] = make_cown<detersl::types::Resource>();
+      }
     }
 
     (*resolved)[entry.first] = runtime_name;
@@ -145,6 +149,7 @@ static bool resolve_resources(const Node* node,
 static bool run_task_node(Node* node,
                           const nlohmann::json& invocation_resources,
                           const std::string &request_id,
+                          std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>* workflow_resources,
                           std::string* err) {
   if (!node || !node->FuncID) {
     if (err) *err = "task missing func_id";
@@ -159,7 +164,7 @@ static bool run_task_node(Node* node,
   std::unordered_map<std::string, std::string> resolved;
   std::unordered_set<std::string> read_only;
   std::unordered_map<std::string, std::string> value_inputs;
-  if (!resolve_resources(node, invocation_resources, request_id, &resolved, &read_only, &value_inputs, err)) {
+  if (!resolve_resources(node, invocation_resources, request_id, &resolved, &read_only, &value_inputs, workflow_resources, err)) {
     return false;
   }
 
@@ -190,11 +195,13 @@ static bool run_task_node(Node* node,
   func_info.func_input_event.data = input_payload.dump();
 
   detersl::func::WasmFunc func(func_info);
-  schedule_function(func_info, func);
+  schedule_function(func_info, func, workflow_resources);
   return true;
 }
 
-void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::WasmFunc func)
+void schedule_function(detersl::func::WasmFuncInfo func_info,
+                       detersl::func::WasmFunc func, 
+                       std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>* workflow_resources)
 {
   const size_t num_res = func_info.resources.size();
   const size_t num_ro_res = func_info.read_only_resources.size();
@@ -207,6 +214,17 @@ void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::Was
   size_t rw_index = 0;
 
   for(auto & res_name : func_info.resources){
+    if(workflow_resources && workflow_resources->find(res_name) != workflow_resources->end()){
+      // Resource is a workflow-scoped resource
+      if(func_info.read_only_resources.find(res_name) != func_info.read_only_resources.end()){
+        read_only_resources[ro_index++] = (*workflow_resources)[res_name];
+      }
+      else{
+        read_write_resources[rw_index++] = (*workflow_resources)[res_name];
+      }
+      continue;
+    }
+
     if (resource_map.find(res_name) == resource_map.end())
     {
       std::cout << "Creating new cown for resource: " << res_name << std::endl;
@@ -307,7 +325,7 @@ int parse_and_load(const std::string& func_name)
   detersl::func::WasmFunc func(f);
 
   std::cout << "Loaded: " << func_name << std::endl;
-  schedule_function(f, func);
+  schedule_function(f, func, nullptr);
   return 0;
 }
 
@@ -357,7 +375,8 @@ int register_workflow(const detersl::types::Workflow& workflow, std::string* err
 
 bool schedule_workflow(const detersl::types::WorkflowRequest& request, std::string* err)
 {
-  
+  std::unordered_map<std::string, cown_ptr<detersl::types::Resource>> workflow_resources;
+
   nlohmann::json invocation;
   try {
     invocation = nlohmann::json::parse(request.Input);
@@ -388,7 +407,7 @@ bool schedule_workflow(const detersl::types::WorkflowRequest& request, std::stri
     std::string type_lower = node->Type;
     std::transform(type_lower.begin(), type_lower.end(), type_lower.begin(), ::tolower);
     if (type_lower == "task") {
-      if (!run_task_node(node, resources, request.RequestID, err)) {
+      if (!run_task_node(node, resources, request.RequestID, &workflow_resources, err)) {
         return false;
       }
     }
@@ -454,55 +473,6 @@ void register_and_schedule()
     }
 
   }
-}
-
-std::string runNode(Node* node) {
-  if (!node) return {};
-
-  std::string nextInput;
-
-  const std::string type = node->Type;
-  std::string typeLower = type;
-  std::transform(typeLower.begin(), typeLower.end(), typeLower.begin(), ::tolower);
-
-  if (typeLower == "pass") {
-      const std::string res = node->Result;
-      std::string err;
-      if (Advance(&node, &err) != 0) {
-          return {};
-      }
-      if (!node) return res;
-      nextInput = res;
-  } else if (typeLower == "task") {
-      bool ok = false;
-      const std::string res;
-      // TODO: implement runTask for WASM and add resource dependencies between nodes
-      // res = runTask(node, &ok);
-      if (!ok) {
-          return {};
-      }
-      std::string err;
-      if (Advance(&node, &err) != 0) {
-          return {};
-      }
-      if (!node) return res;
-      nextInput = res;
-  } else if (typeLower == "choice") {
-      const std::string in = node->Input;
-      std::string err;
-      if (Advance(&node, &err) != 0) {
-          // on failure, return original input like Go for choice on error path
-          return in;
-      }
-      if (!node) return in;
-      nextInput = in;
-  } else {
-      // unknown node type
-      return {};
-  }
-
-  node->Input = nextInput;
-  return runNode(node);
 }
 
 } // namespace detersl::worker

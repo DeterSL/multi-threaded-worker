@@ -61,7 +61,6 @@ namespace detersl {
                 }
 
                 ~ResourceStorage() {
-                    std::cout << "ResourceStorage destructor called" << std::endl;
                 }
 
             private:

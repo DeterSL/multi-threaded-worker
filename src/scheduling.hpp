@@ -18,6 +18,9 @@ void schedule_function(detersl::func::BasicFuncInfo func_state);
 
 void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::WasmFunc func);
 
+void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::WasmFunc func, 
+                       std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>* workflow_resources);
+
 int parse_and_load(const std::string& func_name);
 
 void register_and_schedule();
