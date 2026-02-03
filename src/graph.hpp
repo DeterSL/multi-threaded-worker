@@ -22,12 +22,11 @@ namespace detersl::worker {
     };
 
     struct Node {
-        std::string RequestID;
+        std::string WorkflowID;
         std::string Type;
         std::string Resource;
         std::optional<int> FuncID;
         std::map<std::string, std::string> Resources;
-        std::vector<detersl::types::DataAccess> DataAccess;
         bool End{false};
         std::string Input;   // raw JSON string
         std::string Result;  // raw JSON string
@@ -39,7 +38,7 @@ namespace detersl::worker {
         std::string ID() const;
     };
 
-    Node* BuildFromWorkflow(const detersl::types::WorkflowRequest& request, std::string* err);
+    Node* BuildFromWorkflow(const detersl::types::Workflow& request, std::string* err);
 
     int Advance(Node** root, std::string* err); // 0 ok, -1 error; sets *root possibly null
 

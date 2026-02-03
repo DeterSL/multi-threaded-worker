@@ -34,7 +34,7 @@ static std::string lower(const std::string& s) {
         return false;
     }
 
-    static Node* buildGraph(const std::string& key, const Workflow& wf, const std::string& reqID,
+    static Node* buildGraph(const std::string& key, const Workflow& wf,
                             std::map<std::string, Node*>& cache, std::string* err) {
         if (auto it = cache.find(key); it != cache.end()) return it->second;
         auto it = wf.States.find(key);
@@ -44,12 +44,11 @@ static std::string lower(const std::string& s) {
         }
         const State& st = it->second;
         Node* n = new Node{
-            .RequestID = reqID,
+            .WorkflowID = wf.ID,
             .Type = st.Type,
             .Resource = st.Resource,
             .FuncID = st.FuncID,
             .Resources = st.Resources,
-            .DataAccess = st.DataAccess,
             .End = st.End,
             .Input = "",
             .Result = st.Result.is_null() ? std::string{} : st.Result.dump(), // <--- FIX
@@ -62,7 +61,7 @@ static std::string lower(const std::string& s) {
         const std::string t = lower(st.Type);
         if (t == "task" || t == "pass") {
             if (!st.Next.empty()) {
-                Node* child = buildGraph(st.Next, wf, reqID, cache, err);
+                Node* child = buildGraph(st.Next, wf, cache, err);
                 if (!child) return nullptr;
                 n->Next = child;
             }
@@ -80,13 +79,13 @@ static std::string lower(const std::string& s) {
                     if (err) *err = "choice \"" + key + "\": " + terr;
                     return nullptr;
                 }
-                Node* child = buildGraph(c.Next, wf, reqID, cache, err);
+                Node* child = buildGraph(c.Next, wf, cache, err);
                 if (!child) return nullptr;
 
                 edges.push_back(ChoiceEdge{c.Variable, op, val, child});
             }
             if (!st.Default.empty()) {
-                Node* child = buildGraph(st.Default, wf, reqID, cache, err);
+                Node* child = buildGraph(st.Default, wf, cache, err);
                 if (!child) return nullptr;
                 edges.push_back(ChoiceEdge{"","default",nullptr, child});
             }
@@ -109,14 +108,13 @@ static std::string lower(const std::string& s) {
         return n;
     }
 
-    Node* BuildFromWorkflow(const WorkflowRequest& request, std::string* err) {
+    Node* BuildFromWorkflow(const Workflow& workflow, std::string* err) {
         std::map<std::string, Node*> cache;
-        Node* root = buildGraph(request.Workflow.StartAt, request.Workflow, request.RequestID, cache, err);
+        Node* root = buildGraph(workflow.StartAt, workflow, cache, err);
         if (!root) {
-            if (err) *err = "faild to build graph: " + *err;
+            if (err) *err = "failed to build graph: " + *err;
             return nullptr;
         }
-        root->Input = request.Input;
         return root;
     }
 

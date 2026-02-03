@@ -28,7 +28,7 @@ std::unordered_map<std::string, std::pair<cown_ptr<detersl::types::Resource>, ui
 BasicMPSCQueue<std::pair<std::string, uint64_t>> deleted_resources_queue;
 std::unordered_map<int, detersl::func::WasmFuncInfo> wasm_func_registry;
 int next_wasm_func_id = 1;
-std::unordered_map<std::string, detersl::types::Workflow> workflow_registry;
+std::unordered_map<std::string, Node*> workflow_registry;
 std::mutex workflow_registry_mutex;
 std::atomic<uint64_t> next_workflow_request_id{1};
 
@@ -83,6 +83,7 @@ static bool parse_resource_placeholder(const std::string& placeholder,
 
 static bool resolve_resources(const Node* node,
                               const nlohmann::json& invocation_resources,
+                              const std::string &request_id,
                               std::unordered_map<std::string, std::string>* resolved,
                               std::unordered_set<std::string>* read_only,
                               std::unordered_map<std::string, std::string>* value_inputs,
@@ -130,7 +131,7 @@ static bool resolve_resources(const Node* node,
       }
       runtime_name = invocation_resources.at(key).get<std::string>();
     } else {
-      runtime_name = node->RequestID + ":" + key;
+      runtime_name = request_id + ":" + key;
     }
 
     (*resolved)[entry.first] = runtime_name;
@@ -143,6 +144,7 @@ static bool resolve_resources(const Node* node,
 
 static bool run_task_node(Node* node,
                           const nlohmann::json& invocation_resources,
+                          const std::string &request_id,
                           std::string* err) {
   if (!node || !node->FuncID) {
     if (err) *err = "task missing func_id";
@@ -157,7 +159,7 @@ static bool run_task_node(Node* node,
   std::unordered_map<std::string, std::string> resolved;
   std::unordered_set<std::string> read_only;
   std::unordered_map<std::string, std::string> value_inputs;
-  if (!resolve_resources(node, invocation_resources, &resolved, &read_only, &value_inputs, err)) {
+  if (!resolve_resources(node, invocation_resources, request_id, &resolved, &read_only, &value_inputs, err)) {
     return false;
   }
 
@@ -347,15 +349,15 @@ int register_workflow(const detersl::types::Workflow& workflow, std::string* err
     if (err) *err = "workflow already registered: " + workflow.ID;
     return -1;
   }
-  workflow_registry.emplace(workflow.ID, workflow);
+  Node* root = BuildFromWorkflow(workflow, err);
+  if (!root) return -1;
+  workflow_registry.emplace(workflow.ID, root);
   return 0;
 }
 
 bool schedule_workflow(const detersl::types::WorkflowRequest& request, std::string* err)
 {
-  Node* root = BuildFromWorkflow(request, err);
-  if (!root) return false;
-
+  
   nlohmann::json invocation;
   try {
     invocation = nlohmann::json::parse(request.Input);
@@ -375,12 +377,18 @@ bool schedule_workflow(const detersl::types::WorkflowRequest& request, std::stri
     return false;
   }
 
-  Node* node = root;
+  auto it = workflow_registry.find(request.WorkflowID);
+  if (it == workflow_registry.end()) {
+    if (err) *err = "unknown workflow id: " + request.WorkflowID;
+    return false;
+  }
+  Node* node = it->second;
+  node->Input = request.Input;
   while (node) {
     std::string type_lower = node->Type;
     std::transform(type_lower.begin(), type_lower.end(), type_lower.begin(), ::tolower);
     if (type_lower == "task") {
-      if (!run_task_node(node, resources, err)) {
+      if (!run_task_node(node, resources, request.RequestID, err)) {
         return false;
       }
     }
@@ -404,11 +412,10 @@ bool invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err)
       if (err) *err = "unknown workflow id: " + invoke.WorkflowID;
       return false;
     }
-    workflow = it->second;
   }
 
   detersl::types::WorkflowRequest request;
-  request.Workflow = std::move(workflow);
+  request.WorkflowID = invoke.WorkflowID;
   request.Input = invoke.Input;
   request.RequestID = invoke.WorkflowID + ":" + std::to_string(next_workflow_request_id.fetch_add(1));
   return schedule_workflow(request, err);

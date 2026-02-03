@@ -15,37 +15,6 @@ namespace detersl {
         using FunctionInput = std::string;
         using FunctionType = FunctionOutput (*)(FunctionInput);
 
-        struct IDsSpec {
-            std::string From;        // json: "from,omitempty"
-            std::string ValueType;   // "int" | "string"
-            std::string Collection;  // "single" | "array"
-        };
-
-        // NOTE: unique_ptr requires explicit copy to make this type copyable.
-        struct DataAccess {
-            std::string Table;                       // json:"table"
-            std::unique_ptr<IDsSpec> IDs;            // json:"ids,omitempty"
-
-            DataAccess() = default;
-
-            // Deep-copy constructor
-            DataAccess(const DataAccess& other)
-                : Table(other.Table)
-                , IDs(other.IDs ? std::make_unique<IDsSpec>(*other.IDs) : nullptr) {}
-
-            // Deep-copy assignment
-            DataAccess& operator=(const DataAccess& other) {
-                if (this == &other) return *this;
-                Table = other.Table;
-                IDs = other.IDs ? std::make_unique<IDsSpec>(*other.IDs) : nullptr;
-                return *this;
-            }
-
-            // Move OK
-            DataAccess(DataAccess&&) noexcept = default;
-            DataAccess& operator=(DataAccess&&) noexcept = default;
-        };
-
         struct Choice {
             std::string Variable;                      // json:"variable"
             std::optional<double> NumericEq;           // json:"numeric_eq"
@@ -63,8 +32,6 @@ namespace detersl {
             std::string Resource;                      // json:"resource,omitempty"
             std::optional<int> FuncID;                 // json:"func_id,omitempty"
             std::map<std::string, std::string> Resources; // json:"resources,omitempty"
-
-            std::vector<DataAccess> DataAccess;        // json:"data_access,omitempty"
             json Result;                               // json:"result,omitempty"
             std::string Next;                          // json:"next,omitempty"
             bool End{false};                           // json:"end,omitempty"
@@ -97,40 +64,12 @@ namespace detersl {
         };
 
         struct WorkflowRequest {
-            Workflow Workflow;                         // json:"workflow"
+            std::string WorkflowID;                   // json:"workflow_id"
             std::string Input;                         // json:"input"
             std::string RequestID;                     // json:"request_id"
         };
 
         // ---------- nlohmann::json (de)serialization ----------
-
-        inline void to_json(json& j, const IDsSpec& v) {
-            j = json::object();
-            if (!v.From.empty()) j["from"] = v.From;
-            j["value_type"] = v.ValueType;
-            j["collection"] = v.Collection;
-        }
-
-        inline void from_json(const json& j, IDsSpec& v) {
-            if (j.contains("from")) v.From = j.at("from").get<std::string>();
-            v.ValueType = j.at("value_type").get<std::string>();
-            v.Collection = j.at("collection").get<std::string>();
-        }
-
-        inline void to_json(json& j, const DataAccess& v) {
-            j = json::object();
-            j["table"] = v.Table;
-            if (v.IDs) j["ids"] = *v.IDs;
-        }
-
-        inline void from_json(const json& j, DataAccess& v) {
-            v.Table = j.at("table").get<std::string>();
-            if (j.contains("ids") && !j.at("ids").is_null()) {
-                v.IDs = std::make_unique<IDsSpec>(j.at("ids").get<IDsSpec>());
-            } else {
-                v.IDs.reset();
-            }
-        }
 
         inline void to_json(json& j, const Choice& v) {
             j = json::object();
@@ -163,7 +102,6 @@ namespace detersl {
             if (!v.Resource.empty())     j["resource"] = v.Resource;
             if (v.FuncID)                j["func_id"] = *v.FuncID;
             if (!v.Resources.empty())    j["resources"] = v.Resources;
-            if (!v.DataAccess.empty())   j["data_access"] = v.DataAccess;
             if (!v.Result.is_null())     j["result"] = v.Result;
             if (!v.Next.empty())         j["next"] = v.Next;
             if (v.End)                   j["end"] = v.End;
@@ -177,7 +115,6 @@ namespace detersl {
             if (j.contains("resource"))      v.Resource = j.at("resource").get<std::string>();
             if (j.contains("func_id"))       v.FuncID = j.at("func_id").get<int>();
             if (j.contains("resources"))     v.Resources = j.at("resources").get<std::map<std::string, std::string>>();
-            if (j.contains("data_access"))   v.DataAccess = j.at("data_access").get<std::vector<DataAccess>>();
             if (j.contains("result"))        v.Result = j.at("result");
             if (j.contains("next"))          v.Next = j.at("next").get<std::string>();
             if (j.contains("end"))           v.End = j.at("end").get<bool>();
@@ -223,13 +160,13 @@ namespace detersl {
 
         inline void to_json(json& j, const WorkflowRequest& v) {
             j = json::object();
-            j["workflow"]   = v.Workflow;
+            j["workflow_id"]   = v.WorkflowID;
             j["input"]      = v.Input;
             j["request_id"] = v.RequestID;
         }
 
         inline void from_json(const json& j, WorkflowRequest& v) {
-            v.Workflow  = j.at("workflow").get<Workflow>();
+            v.WorkflowID  = j.at("workflow_id").get<std::string>();
             v.Input     = j.at("input").get<std::string>();
             v.RequestID = j.at("request_id").get<std::string>();
         }
