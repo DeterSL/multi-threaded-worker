@@ -58,7 +58,7 @@ void register_and_schedule_json(){
         res.set_content("Registered func_id: " + std::to_string(func_id) + "\n", "text/plain");
     });
 
-    server.Post("/workflow", [&](const httplib::Request& req, httplib::Response& res) {
+    server.Post("/workflow/register", [&](const httplib::Request& req, httplib::Response& res) {
         if (req.body.empty()) {
             res.status = 400;
             res.set_content("Missing JSON body.\n", "text/plain");
@@ -75,18 +75,54 @@ void register_and_schedule_json(){
         }
 
         std::string error;
-        detersl::types::WorkflowRequest request;
+        detersl::types::Workflow workflow;
         try {
-            request = j.get<detersl::types::WorkflowRequest>();
+            workflow = j.get<detersl::types::Workflow>();
         } catch (const std::exception& e) {
             res.status = 400;
-            res.set_content(std::string("Invalid workflow request: ") + e.what() + "\n", "text/plain");
+            res.set_content(std::string("Invalid workflow definition: ") + e.what() + "\n", "text/plain");
             return;
         }
 
-        if (!detersl::worker::schedule_workflow(request, &error)) {
+        if (detersl::worker::register_workflow(workflow, &error) != 0) {
             res.status = 400;
-            res.set_content(std::string("Failed to schedule workflow: ") + error + "\n", "text/plain");
+            res.set_content(std::string("Failed to register workflow: ") + error + "\n", "text/plain");
+            return;
+        }
+
+        res.status = 201;
+        res.set_content("Workflow registered.\n", "text/plain");
+    });
+
+    server.Post("/workflow/invoke", [&](const httplib::Request& req, httplib::Response& res) {
+        if (req.body.empty()) {
+            res.status = 400;
+            res.set_content("Missing JSON body.\n", "text/plain");
+            return;
+        }
+
+        nlohmann::json j;
+        try {
+            j = nlohmann::json::parse(req.body);
+        } catch (const nlohmann::json::parse_error& e) {
+            res.status = 400;
+            res.set_content(std::string("JSON parse error: ") + e.what() + "\n", "text/plain");
+            return;
+        }
+
+        std::string error;
+        detersl::types::InvokeDTO invoke;
+        try {
+            invoke = j.get<detersl::types::InvokeDTO>();
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content(std::string("Invalid workflow invocation: ") + e.what() + "\n", "text/plain");
+            return;
+        }
+
+        if (!detersl::worker::invoke_workflow(invoke, &error)) {
+            res.status = 400;
+            res.set_content(std::string("Failed to invoke workflow: ") + error + "\n", "text/plain");
             return;
         }
 

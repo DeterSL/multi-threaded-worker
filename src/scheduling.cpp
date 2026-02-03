@@ -2,6 +2,8 @@
 
 #include <dlfcn.h>
 #include <cctype>
+#include <atomic>
+#include <mutex>
 #include <unordered_set>
 #include <fstream>
 #include "basic-net.hpp"
@@ -26,6 +28,9 @@ std::unordered_map<std::string, std::pair<cown_ptr<detersl::types::Resource>, ui
 BasicMPSCQueue<std::pair<std::string, uint64_t>> deleted_resources_queue;
 std::unordered_map<int, detersl::func::WasmFuncInfo> wasm_func_registry;
 int next_wasm_func_id = 1;
+std::unordered_map<std::string, detersl::types::Workflow> workflow_registry;
+std::mutex workflow_registry_mutex;
+std::atomic<uint64_t> next_workflow_request_id{1};
 
 // namespace detersl::worker
 void register_function(const std::string& name, detersl::types::FunctionType fn)
@@ -330,6 +335,22 @@ int register_wasm_function(const nlohmann::json& j, std::string* err, int* func_
   }
 }
 
+int register_workflow(const detersl::types::Workflow& workflow, std::string* err)
+{
+  if (workflow.ID.empty()) {
+    if (err) *err = "workflow id is required";
+    return -1;
+  }
+
+  std::lock_guard<std::mutex> lock(workflow_registry_mutex);
+  if (workflow_registry.find(workflow.ID) != workflow_registry.end()) {
+    if (err) *err = "workflow already registered: " + workflow.ID;
+    return -1;
+  }
+  workflow_registry.emplace(workflow.ID, workflow);
+  return 0;
+}
+
 bool schedule_workflow(const detersl::types::WorkflowRequest& request, std::string* err)
 {
   Node* root = BuildFromWorkflow(request, err);
@@ -371,6 +392,26 @@ bool schedule_workflow(const detersl::types::WorkflowRequest& request, std::stri
   }
 
   return true;
+}
+
+bool invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err)
+{
+  detersl::types::Workflow workflow;
+  {
+    std::lock_guard<std::mutex> lock(workflow_registry_mutex);
+    auto it = workflow_registry.find(invoke.WorkflowID);
+    if (it == workflow_registry.end()) {
+      if (err) *err = "unknown workflow id: " + invoke.WorkflowID;
+      return false;
+    }
+    workflow = it->second;
+  }
+
+  detersl::types::WorkflowRequest request;
+  request.Workflow = std::move(workflow);
+  request.Input = invoke.Input;
+  request.RequestID = invoke.WorkflowID + ":" + std::to_string(next_workflow_request_id.fetch_add(1));
+  return schedule_workflow(request, err);
 }
 
 void register_and_schedule()

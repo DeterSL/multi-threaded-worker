@@ -29,5 +29,10 @@ void register_function(const std::string& name, detersl::types::FunctionType fn)
 void cleanup_resources();
 
 int register_wasm_function(const nlohmann::json& j, std::string* err, int* func_id);
+
+int register_workflow(const detersl::types::Workflow& workflow, std::string* err);
+
+bool invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err);
+
 bool schedule_workflow(const detersl::types::WorkflowRequest& request, std::string* err);
 } // namespace detersl::worker
