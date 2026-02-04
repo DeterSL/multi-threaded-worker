@@ -5,6 +5,7 @@
 #include <atomic>
 #include <mutex>
 #include <unordered_set>
+#include <vector>
 #include <fstream>
 #include "basic-net.hpp"
 #include "cpp-func.hpp"
@@ -31,6 +32,25 @@ int next_wasm_func_id = 1;
 std::unordered_map<std::string, Node*> workflow_registry;
 std::mutex workflow_registry_mutex;
 std::atomic<uint64_t> next_workflow_request_id{1};
+
+struct ChoiceControl {
+  bool decided = false;
+  size_t selected = 0;
+
+  ~ChoiceControl(){
+    std::cout << "ChoiceControl destructor called" << std::endl;
+  }
+};
+
+struct BranchGuard {
+  cown_ptr<ChoiceControl> control;
+  size_t edge_index = 0;
+};
+
+static void schedule_function_guarded(detersl::func::WasmFuncInfo func_info,
+                                      detersl::func::WasmFunc func, 
+                                      std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>* workflow_resources,
+                                      const std::vector<BranchGuard>& guards);
 
 // namespace detersl::worker
 void register_function(const std::string& name, detersl::types::FunctionType fn)
@@ -150,6 +170,7 @@ static bool run_task_node(Node* node,
                           const nlohmann::json& invocation_resources,
                           const std::string &request_id,
                           std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>* workflow_resources,
+                          const std::vector<BranchGuard>& guards,
                           std::string* err) {
   if (!node || !node->FuncID) {
     if (err) *err = "task missing func_id";
@@ -195,7 +216,137 @@ static bool run_task_node(Node* node,
   func_info.func_input_event.data = input_payload.dump();
 
   detersl::func::WasmFunc func(func_info);
-  schedule_function(func_info, func, workflow_resources);
+  if (guards.empty()) {
+    schedule_function(func_info, func, workflow_resources);
+  } else {
+    schedule_function_guarded(func_info, func, workflow_resources, guards);
+  }
+  return true;
+}
+
+static void schedule_choice_node(const Node* node,
+                                 const nlohmann::json& input,
+                                 cown_ptr<ChoiceControl> control)
+{
+  when(control) << [node, input](auto cown) {
+    size_t default_index = static_cast<size_t>(-1);
+    for (size_t i = 0; i < node->Choices.size(); ++i) {
+      const auto& edge = node->Choices[i];
+      if (edge.Operand == "default") {
+        default_index = i;
+        continue;
+      }
+      json val;
+      if (!readByPath(input, edge.Variable, &val)) {
+        continue;
+      }
+      bool match = false;
+      if (!cmp(val, edge.Operand, edge.Value, &match)) {
+        std::cerr << "choice: unsupported operand \"" << edge.Operand << "\"\n";
+        cown->decided = true;
+        return;
+      }
+      if (match) {
+        cown->selected = i;
+        cown->decided = true;
+        return;
+      }
+    }
+
+    if (default_index != static_cast<size_t>(-1)) {
+      cown->selected = default_index;
+      cown->decided = true;
+      return;
+    }
+
+    std::cerr << "choice: no rule matched and no default\n";
+    cown->decided = true;
+  };
+}
+
+static bool schedule_graph(Node* node,
+                           const nlohmann::json& input,
+                           const nlohmann::json& resources,
+                           const std::string& request_id,
+                           std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>* workflow_resources,
+                           std::unordered_map<const Node*, cown_ptr<ChoiceControl>>* choice_controls,
+                           const std::vector<BranchGuard>& guards,
+                           std::unordered_set<const Node*>* visiting,
+                           std::string* err)
+{
+  if (!node) return true;
+  if (!workflow_resources || !choice_controls || !visiting) {
+    if (err) *err = "internal workflow scheduling error";
+    return false;
+  }
+  if (visiting->count(node) != 0) {
+    if (err) *err = "cycle detected in workflow graph";
+    return false;
+  }
+
+  visiting->insert(node);
+
+  std::string type_lower = node->Type;
+  std::transform(type_lower.begin(), type_lower.end(), type_lower.begin(), ::tolower);
+  if (type_lower == "task") {
+    if (!run_task_node(node, resources, request_id, workflow_resources, guards, err)) {
+      visiting->erase(node);
+      return false;
+    }
+    if (node->End) {
+      visiting->erase(node);
+      return true;
+    }
+    if (!node->Next) {
+      if (err) *err = "node has no Next and End=false";
+      visiting->erase(node);
+      return false;
+    }
+    if (!schedule_graph(node->Next, input, resources, request_id, workflow_resources, choice_controls, guards, visiting, err)) {
+      visiting->erase(node);
+      return false;
+    }
+  } else if (type_lower == "pass") {
+    if (node->End) {
+      visiting->erase(node);
+      return true;
+    }
+    if (!node->Next) {
+      if (err) *err = "node has no Next and End=false";
+      visiting->erase(node);
+      return false;
+    }
+    if (!schedule_graph(node->Next, input, resources, request_id, workflow_resources, choice_controls, guards, visiting, err)) {
+      visiting->erase(node);
+      return false;
+    }
+  } else if (type_lower == "choice") {
+    cown_ptr<ChoiceControl> control;
+    auto it = choice_controls->find(node);
+    if (it == choice_controls->end()) {
+      control = make_cown<ChoiceControl>();
+      choice_controls->emplace(node, control);
+      schedule_choice_node(node, input, control);
+    } else {
+      control = it->second;
+    }
+
+    for (size_t i = 0; i < node->Choices.size(); ++i) {
+      const ChoiceEdge& edge = node->Choices[i];
+      std::vector<BranchGuard> next_guards = guards;
+      next_guards.push_back(BranchGuard{control, i});
+      if (!schedule_graph(edge.Next, input, resources, request_id, workflow_resources, choice_controls, next_guards, visiting, err)) {
+        visiting->erase(node);
+        return false;
+      }
+    }
+  } else {
+    if (err) *err = "unknown node type \"" + node->Type + "\"";
+    visiting->erase(node);
+    return false;
+  }
+
+  visiting->erase(node);
   return true;
 }
 
@@ -245,6 +396,84 @@ void schedule_function(detersl::func::WasmFuncInfo func_info,
   cown_array<detersl::types::Resource> ro_cowns{read_only_resources, num_ro_res};
 
   when(rw_cowns, read(ro_cowns)) << [func_info, func, local_ref_counts](auto rw_c, auto ro_c) {  
+    detersl::runner::WasmRunner runner(rw_c, ro_c, func_info, func);
+
+    // TODO: maybe a return code of funciton?
+    // Like previous version
+    runner.run();
+    
+
+    for (const auto& res_name : runner.get_deleted_resources()) {
+      deleted_resources_queue.push({res_name, local_ref_counts.at(res_name)});
+    }
+  };
+}
+
+static void schedule_function_guarded(detersl::func::WasmFuncInfo func_info,
+                                      detersl::func::WasmFunc func, 
+                                      std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>* workflow_resources,
+                                      const std::vector<BranchGuard>& guards)
+{
+  const size_t num_res = func_info.resources.size();
+  const size_t num_ro_res = func_info.read_only_resources.size();
+  const size_t num_rw_res = num_res - num_ro_res;
+  std::unordered_map<std::string, uint64_t> local_ref_counts;
+
+  cown_ptr<detersl::types::Resource> read_write_resources[num_rw_res];
+  cown_ptr<detersl::types::Resource> read_only_resources[num_ro_res];
+  size_t ro_index = 0;
+  size_t rw_index = 0;
+
+  for(auto & res_name : func_info.resources){
+    if(workflow_resources && workflow_resources->find(res_name) != workflow_resources->end()){
+      // Resource is a workflow-scoped resource
+      if(func_info.read_only_resources.find(res_name) != func_info.read_only_resources.end()){
+        read_only_resources[ro_index++] = (*workflow_resources)[res_name];
+      }
+      else{
+        read_write_resources[rw_index++] = (*workflow_resources)[res_name];
+      }
+      continue;
+    }
+
+    if (resource_map.find(res_name) == resource_map.end())
+    {
+      std::cout << "Creating new cown for resource: " << res_name << std::endl;
+      resource_map[res_name] = std::make_pair(make_cown<detersl::types::Resource>(), 0);
+    }
+
+    if(func_info.read_only_resources.find(res_name) != func_info.read_only_resources.end()){
+      read_only_resources[ro_index++] = resource_map[res_name].first;
+    }
+    else{
+      read_write_resources[rw_index++] = resource_map[res_name].first;
+    }
+    resource_map[res_name].second++; // increment ref count
+    local_ref_counts[res_name] = resource_map[res_name].second;
+  }
+
+  std::vector<cown_ptr<ChoiceControl>> guard_cowns;
+  guard_cowns.reserve(guards.size());
+  std::vector<size_t> guard_edges;
+  guard_edges.reserve(guards.size());
+  for (const auto& guard : guards) {
+    guard_cowns.push_back(guard.control);
+    guard_edges.push_back(guard.edge_index);
+  }
+
+  cown_array<detersl::types::Resource> rw_cowns{read_write_resources, num_rw_res};
+  cown_array<detersl::types::Resource> ro_cowns{read_only_resources, num_ro_res};
+  cown_array<ChoiceControl> choice_cowns{guard_cowns.data(), guard_cowns.size()};
+
+  when(rw_cowns, read(ro_cowns), read(choice_cowns)) << [func_info, func, local_ref_counts, guard_edges](auto rw_c, auto ro_c, auto guard_c) {  
+    for (size_t i = 0; i < guard_edges.size(); ++i) {
+      ChoiceControl* state = const_cast<ChoiceControl*>(&(*guard_c.array[i]));
+      if (!state->decided || state->selected != guard_edges[i]) {
+        std::cout << "Skipping function " << func_info.func_name << " due to guard\n";
+        return;
+      }
+    }
+
     detersl::runner::WasmRunner runner(rw_c, ro_c, func_info, func);
 
     // TODO: maybe a return code of funciton?
@@ -401,24 +630,10 @@ bool schedule_workflow(const detersl::types::WorkflowRequest& request, std::stri
     if (err) *err = "unknown workflow id: " + request.WorkflowID;
     return false;
   }
-  Node* node = it->second;
-  node->Input = request.Input;
-  while (node) {
-    std::string type_lower = node->Type;
-    std::transform(type_lower.begin(), type_lower.end(), type_lower.begin(), ::tolower);
-    if (type_lower == "task") {
-      if (!run_task_node(node, resources, request.RequestID, &workflow_resources, err)) {
-        return false;
-      }
-    }
-    std::string adv_err;
-    if (Advance(&node, &adv_err) != 0) {
-      if (err) *err = adv_err;
-      return false;
-    }
-  }
-
-  return true;
+  Node* root = it->second;
+  std::unordered_map<const Node*, cown_ptr<ChoiceControl>> choice_controls;
+  std::unordered_set<const Node*> visiting;
+  return schedule_graph(root, invocation, resources, request.RequestID, &workflow_resources, &choice_controls, {}, &visiting, err);
 }
 
 bool invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err)
