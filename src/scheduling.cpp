@@ -44,13 +44,13 @@ struct ChoiceControl {
 
 struct BranchGuard {
   cown_ptr<ChoiceControl> control;
-  size_t edge_index = 0;
+  size_t edge_index;
 };
 
 static void schedule_function_guarded(detersl::func::WasmFuncInfo func_info,
                                       detersl::func::WasmFunc func, 
                                       std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>* workflow_resources,
-                                      const std::vector<BranchGuard>& guards);
+                                      const BranchGuard* guard);
 
 // namespace detersl::worker
 void register_function(const std::string& name, detersl::types::FunctionType fn)
@@ -170,7 +170,7 @@ static bool run_task_node(Node* node,
                           const nlohmann::json& invocation_resources,
                           const std::string &request_id,
                           std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>* workflow_resources,
-                          const std::vector<BranchGuard>& guards,
+                          const BranchGuard* guard,
                           std::string* err) {
   if (!node || !node->FuncID) {
     if (err) *err = "task missing func_id";
@@ -216,19 +216,20 @@ static bool run_task_node(Node* node,
   func_info.func_input_event.data = input_payload.dump();
 
   detersl::func::WasmFunc func(func_info);
-  if (guards.empty()) {
+  if (guard == nullptr) {
     schedule_function(func_info, func, workflow_resources);
   } else {
-    schedule_function_guarded(func_info, func, workflow_resources, guards);
+    schedule_function_guarded(func_info, func, workflow_resources, guard);
   }
   return true;
 }
 
 static void schedule_choice_node(const Node* node,
                                  const nlohmann::json& input,
-                                 cown_ptr<ChoiceControl> control)
+                                 cown_ptr<ChoiceControl> control,
+                                 const BranchGuard* guard)
 {
-  when(control) << [node, input](auto cown) {
+  auto eval_choice = [node, input](auto& cown) {
     size_t default_index = static_cast<size_t>(-1);
     for (size_t i = 0; i < node->Choices.size(); ++i) {
       const auto& edge = node->Choices[i];
@@ -262,6 +263,23 @@ static void schedule_choice_node(const Node* node,
     std::cerr << "choice: no rule matched and no default\n";
     cown->decided = true;
   };
+
+  if (guard) {
+    const size_t guard_edge = guard->edge_index;
+    when(control, read(guard->control)) << [eval_choice, guard_edge](auto cown, auto parent) {
+      if (!parent->decided || parent->selected != guard_edge) {
+        cown->decided = true;
+        cown->selected = static_cast<size_t>(-1);
+        return;
+      }
+      eval_choice(cown);
+    };
+    return;
+  }
+
+  when(control) << [eval_choice](auto cown) {
+    eval_choice(cown);
+  };
 }
 
 static bool schedule_graph(Node* node,
@@ -270,7 +288,7 @@ static bool schedule_graph(Node* node,
                            const std::string& request_id,
                            std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>* workflow_resources,
                            std::unordered_map<const Node*, cown_ptr<ChoiceControl>>* choice_controls,
-                           const std::vector<BranchGuard>& guards,
+                           const BranchGuard* guard,
                            std::unordered_set<const Node*>* visiting,
                            std::string* err)
 {
@@ -289,7 +307,7 @@ static bool schedule_graph(Node* node,
   std::string type_lower = node->Type;
   std::transform(type_lower.begin(), type_lower.end(), type_lower.begin(), ::tolower);
   if (type_lower == "task") {
-    if (!run_task_node(node, resources, request_id, workflow_resources, guards, err)) {
+    if (!run_task_node(node, resources, request_id, workflow_resources, guard, err)) {
       visiting->erase(node);
       return false;
     }
@@ -302,7 +320,7 @@ static bool schedule_graph(Node* node,
       visiting->erase(node);
       return false;
     }
-    if (!schedule_graph(node->Next, input, resources, request_id, workflow_resources, choice_controls, guards, visiting, err)) {
+    if (!schedule_graph(node->Next, input, resources, request_id, workflow_resources, choice_controls, guard, visiting, err)) {
       visiting->erase(node);
       return false;
     }
@@ -316,7 +334,7 @@ static bool schedule_graph(Node* node,
       visiting->erase(node);
       return false;
     }
-    if (!schedule_graph(node->Next, input, resources, request_id, workflow_resources, choice_controls, guards, visiting, err)) {
+    if (!schedule_graph(node->Next, input, resources, request_id, workflow_resources, choice_controls, guard, visiting, err)) {
       visiting->erase(node);
       return false;
     }
@@ -326,16 +344,15 @@ static bool schedule_graph(Node* node,
     if (it == choice_controls->end()) {
       control = make_cown<ChoiceControl>();
       choice_controls->emplace(node, control);
-      schedule_choice_node(node, input, control);
+      schedule_choice_node(node, input, control, guard);
     } else {
       control = it->second;
     }
 
     for (size_t i = 0; i < node->Choices.size(); ++i) {
       const ChoiceEdge& edge = node->Choices[i];
-      std::vector<BranchGuard> next_guards = guards;
-      next_guards.push_back(BranchGuard{control, i});
-      if (!schedule_graph(edge.Next, input, resources, request_id, workflow_resources, choice_controls, next_guards, visiting, err)) {
+      BranchGuard next_guard{control, i};
+      if (!schedule_graph(edge.Next, input, resources, request_id, workflow_resources, choice_controls, &next_guard, visiting, err)) {
         visiting->erase(node);
         return false;
       }
@@ -412,7 +429,7 @@ void schedule_function(detersl::func::WasmFuncInfo func_info,
 static void schedule_function_guarded(detersl::func::WasmFuncInfo func_info,
                                       detersl::func::WasmFunc func, 
                                       std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>* workflow_resources,
-                                      const std::vector<BranchGuard>& guards)
+                                      const BranchGuard* guard)
 {
   const size_t num_res = func_info.resources.size();
   const size_t num_ro_res = func_info.read_only_resources.size();
@@ -452,28 +469,26 @@ static void schedule_function_guarded(detersl::func::WasmFuncInfo func_info,
     local_ref_counts[res_name] = resource_map[res_name].second;
   }
 
-  std::vector<cown_ptr<ChoiceControl>> guard_cowns;
-  guard_cowns.reserve(guards.size());
-  std::vector<size_t> guard_edges;
-  guard_edges.reserve(guards.size());
-  for (const auto& guard : guards) {
-    guard_cowns.push_back(guard.control);
-    guard_edges.push_back(guard.edge_index);
-  }
-
   cown_array<detersl::types::Resource> rw_cowns{read_write_resources, num_rw_res};
   cown_array<detersl::types::Resource> ro_cowns{read_only_resources, num_ro_res};
-  cown_array<ChoiceControl> choice_cowns{guard_cowns.data(), guard_cowns.size()};
 
-  when(rw_cowns, read(ro_cowns), read(choice_cowns)) << [func_info, func, local_ref_counts, guard_edges](auto rw_c, auto ro_c, auto guard_c) {  
-    for (size_t i = 0; i < guard_edges.size(); ++i) {
-      ChoiceControl* state = const_cast<ChoiceControl*>(&(*guard_c.array[i]));
-      if (!state->decided || state->selected != guard_edges[i]) {
-        std::cout << "Skipping function " << func_info.func_name << " due to guard\n";
-        return;
-      }
+  cown_ptr<ChoiceControl> guard_cown;
+  size_t guard_edge;
+  if (guard) {
+    guard_cown = guard->control;
+    guard_edge = guard->edge_index;
+  } else {
+    // This should never happen since this function is only called when guard is not null
+    std::cerr << "schedule_function_guarded called with null guard\n";
+    return;
+  }
+
+  when(rw_cowns, read(ro_cowns), read(guard_cown)) << [func_info, func, local_ref_counts, guard_edge](auto rw_c, auto ro_c, auto guard_c) {  
+    if (!guard_c->decided || guard_c->selected != guard_edge) {
+      std::cout << "Skipping function " << func_info.func_name << "\n";
+      return;
     }
-
+    
     detersl::runner::WasmRunner runner(rw_c, ro_c, func_info, func);
 
     // TODO: maybe a return code of funciton?
@@ -633,7 +648,7 @@ bool schedule_workflow(const detersl::types::WorkflowRequest& request, std::stri
   Node* root = it->second;
   std::unordered_map<const Node*, cown_ptr<ChoiceControl>> choice_controls;
   std::unordered_set<const Node*> visiting;
-  return schedule_graph(root, invocation, resources, request.RequestID, &workflow_resources, &choice_controls, {}, &visiting, err);
+  return schedule_graph(root, invocation, resources, request.RequestID, &workflow_resources, &choice_controls, nullptr, &visiting, err);
 }
 
 bool invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err)
