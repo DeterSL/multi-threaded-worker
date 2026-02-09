@@ -6,4 +6,4 @@
 	url = git@github.com:microsoft/snmalloc.git
 [submodule "external/wasm-exec-env"]
 	path = external/wasm-exec-env
-	url = https://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@github.com/DeterSL/wasm-exec-env
+	url = https://github.com/DeterSL/wasm-exec-env

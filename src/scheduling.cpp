@@ -12,6 +12,7 @@
 #include "cpp-runner.hpp"
 #include "cpp/cown.h"
 #include "resource.hpp"
+#include "rust/cxx.h"
 #include "types.hpp"
 #include "wasm-func.hpp"
 #include "wasm-runner.hpp"
@@ -587,12 +588,24 @@ void cleanup_resources()
 
 int register_wasm_function(const nlohmann::json& j, std::string* err, int* func_id)
 {
+
+  static rust::Box<FfiExecutioner> compile_exec = new_executioner(*engine, new_cpp_kv(new KVInterface()));
+  
   try {
+
+    // TODO: this is not function DSL, so we cannot pass it directly 
+    // to the executioner. We have to create this after having
+    // our own function DSL.
+    compile_exec->executioner_compile_json(j.dump());
+    
     detersl::func::WasmFuncInfo info = detersl::func::WasmFuncInfo::from_json(j);
     const int id = next_wasm_func_id++;
     wasm_func_registry[id] = std::move(info);
     if (func_id) *func_id = id;
     return 0;
+  } catch (const rust::Error& e) {
+    if (err) *err = e.what();
+    return -1;
   } catch (const std::exception& e) {
     if (err) *err = e.what();
     return -1;
