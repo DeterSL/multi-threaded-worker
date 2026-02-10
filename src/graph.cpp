@@ -239,14 +239,11 @@ static std::string lower(const std::string& s) {
         return false;
     }
 
-    bool detect_cycle(Node* root, std::unordered_set<const Node*>* visiting, std::string* err){
+    bool detect_cycle(Node* root, std::string* err){
+        std::unordered_set<const Node*> visiting;
         if (!root) return true;
-        if (!visiting) {
-            if (err) *err = "internal workflow scheduling error";
-            return false;
-        }
 
-        visiting->clear();
+        visiting.clear();
         std::unordered_set<const Node*> visited;
 
         struct Frame {
@@ -256,7 +253,7 @@ static std::string lower(const std::string& s) {
 
         std::vector<Frame> stack;
         stack.push_back({root, 0});
-        visiting->insert(root);
+        visiting.insert(root);
 
         while (!stack.empty()) {
             Frame& frame = stack.back();
@@ -270,16 +267,16 @@ static std::string lower(const std::string& s) {
             frame.next_index++;
             if (!child) continue;
             if (visited.count(child) != 0) continue;
-            if (visiting->count(child) != 0) {
+            if (visiting.count(child) != 0) {
                 if (err) *err = "cycle detected in workflow graph";
                 return false;
             }
-            visiting->insert(child);
+            visiting.insert(child);
             stack.push_back({child, 0});
             continue;
             }
 
-            visiting->erase(node);
+            visiting.erase(node);
             visited.insert(node);
             stack.pop_back();
         }

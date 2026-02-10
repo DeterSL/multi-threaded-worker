@@ -41,7 +41,7 @@ namespace detersl::worker {
 
     Node* BuildFromWorkflow(const detersl::types::Workflow& request, std::string* err);
 
-    bool detect_cycle(Node* root, std::unordered_set<const Node*>* visiting, std::string* err);
+    bool detect_cycle(Node* root, std::string* err);
 
     // helpers exposed for tests
     bool readByPath(const json& input, const std::string& path, json* out);
