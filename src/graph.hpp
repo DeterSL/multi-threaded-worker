@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <unordered_set>
 
 using json = nlohmann::json;
 
@@ -40,7 +41,7 @@ namespace detersl::worker {
 
     Node* BuildFromWorkflow(const detersl::types::Workflow& request, std::string* err);
 
-    int Advance(Node** root, std::string* err); // 0 ok, -1 error; sets *root possibly null
+    bool detect_cycle(Node* root, std::unordered_set<const Node*>* visiting, std::string* err);
 
     // helpers exposed for tests
     bool readByPath(const json& input, const std::string& path, json* out);

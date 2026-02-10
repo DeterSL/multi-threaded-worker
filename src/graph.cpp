@@ -189,52 +189,101 @@ static std::string lower(const std::string& s) {
         return true;
     }
 
-    int Advance(Node** root, std::string* err) {
-        if (!root || !*root) return 0;
-        Node* n = *root;
-        const std::string t = lower(n->Type);
-
-        if (t == "task" || t == "pass") {
-            if (n->End) {
-                *root = nullptr;
-                return 0;
-            }
-            if (n->Next == nullptr) {
-                if (err) *err = "node has no Next and End=false";
-                return -1;
-            }
-            *root = n->Next;
-            return 0;
-        } else if (t == "choice") {
-            json typed;
-            if (!n->Input.empty()) {
-                try {
-                    typed = json::parse(n->Input);
-                } catch (...) {
-                    // ignore parse errors; act as nil
-                }
-            }
-            Node* def = nullptr;
-            for (const auto& e : n->Choices) {
-                if (e.Operand == "default") { def = e.Next; continue; }
-                json val;
-                if (!readByPath(typed, e.Variable, &val)) continue;
-                bool match = false;
-                if (!cmp(val, e.Operand, e.Value, &match)) {
-                    if (err) *err = "unsupported operand \"" + e.Operand + "\"";
-                    return -1;
-                }
-                if (match && e.Next) {
-                    *root = e.Next;
-                    return 0;
-                }
-            }
-            if (def) { *root = def; return 0; }
-            if (err) *err = "choice: no rule matched and no default";
-            return -1;
+    static bool get_child_count(const Node* node, size_t* count, std::string* err){
+        if (!node || !count) {
+            if (err) *err = "internal workflow scheduling error";
+            return false;
         }
-        if (err) *err = "unknown node type \"" + n->Type + "\"";
-        return -1;
+
+        std::string type_lower = node->Type;
+        std::transform(type_lower.begin(), type_lower.end(), type_lower.begin(), ::tolower);
+        if (type_lower == "task" || type_lower == "pass") {
+            *count = node->Next ? 1 : 0;
+            return true;
+        }
+        if (type_lower == "choice") {
+            *count = node->Choices.size();
+            return true;
+        }
+
+        if (err) *err = "unknown node type \"" + node->Type + "\"";
+        return false;
+    }
+
+    static bool get_child_at(const Node* node, size_t index, const Node** child, std::string* err){
+        if (!node || !child) {
+            if (err) *err = "internal workflow scheduling error";
+            return false;
+        }
+
+        std::string type_lower = node->Type;
+        std::transform(type_lower.begin(), type_lower.end(), type_lower.begin(), ::tolower);
+        if (type_lower == "task" || type_lower == "pass") {
+            if (index != 0) {
+            *child = nullptr;
+            return true;
+            }
+            *child = node->Next;
+            return true;
+        }
+        if (type_lower == "choice") {
+            if (index >= node->Choices.size()) {
+            *child = nullptr;
+            return true;
+            }
+            *child = node->Choices[index].Next;
+            return true;
+        }
+
+        if (err) *err = "unknown node type \"" + node->Type + "\"";
+        return false;
+    }
+
+    bool detect_cycle(Node* root, std::unordered_set<const Node*>* visiting, std::string* err){
+        if (!root) return true;
+        if (!visiting) {
+            if (err) *err = "internal workflow scheduling error";
+            return false;
+        }
+
+        visiting->clear();
+        std::unordered_set<const Node*> visited;
+
+        struct Frame {
+            const Node* node;
+            size_t next_index;
+        };
+
+        std::vector<Frame> stack;
+        stack.push_back({root, 0});
+        visiting->insert(root);
+
+        while (!stack.empty()) {
+            Frame& frame = stack.back();
+            const Node* node = frame.node;
+            size_t child_count = 0;
+            if (!get_child_count(node, &child_count, err)) return false;
+
+            if (frame.next_index < child_count) {
+            const Node* child = nullptr;
+            if (!get_child_at(node, frame.next_index, &child, err)) return false;
+            frame.next_index++;
+            if (!child) continue;
+            if (visited.count(child) != 0) continue;
+            if (visiting->count(child) != 0) {
+                if (err) *err = "cycle detected in workflow graph";
+                return false;
+            }
+            visiting->insert(child);
+            stack.push_back({child, 0});
+            continue;
+            }
+
+            visiting->erase(node);
+            visited.insert(node);
+            stack.pop_back();
+        }
+        return true;
     }
 
 
