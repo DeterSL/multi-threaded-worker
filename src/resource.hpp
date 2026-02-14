@@ -27,6 +27,10 @@ namespace detersl {
                     return data_;
                 }
 
+                const detersl::types::Bytes& get_data() const{
+                    return data_;
+                }
+
                 Resource& operator=(const Resource& t) {
                     data_ = t.data_;
                     return *this; 

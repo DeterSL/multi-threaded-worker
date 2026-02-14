@@ -67,6 +67,10 @@ namespace detersl {
                 return data_;
             }
 
+            const std::vector<uint8_t, Alloc>& as_vec() const {
+                return data_;
+            }
+
         private:
             std::vector<uint8_t, Alloc> data_;
         };

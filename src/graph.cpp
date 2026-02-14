@@ -2,6 +2,8 @@
 #include "graph.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 
 namespace detersl::worker {
@@ -118,10 +120,10 @@ static std::string lower(const std::string& s) {
         return root;
     }
 
-    static bool asNumber(const json& v, double* out) {
-        if (v.is_number_float()) { *out = v.get<double>(); return true; }
-        if (v.is_number_integer()) { *out = static_cast<double>(v.get<long long>()); return true; }
-        if (v.is_string()) { try { *out = std::stod(v.get<std::string>()); return true; } catch(...){} }
+    static bool asNumber(const json& v, uint32_t* out) {
+        if (v.is_number_float()) { *out = static_cast<uint32_t>(v.get<double>()); return true; }
+        if (v.is_number_integer()) { *out = static_cast<uint32_t>(v.get<long long>()); return true; }
+        if (v.is_string()) { try { *out = std::stoi(v.get<std::string>()); return true; } catch(...){} }
         return false;
     }
 
@@ -129,19 +131,19 @@ static std::string lower(const std::string& s) {
         if (operand == "==" || operand == "eq") {
             if (rhs.is_string()) { *match = actual.is_string() && actual.get<std::string>() == rhs.get<std::string>(); return true; }
             if (rhs.is_boolean()) { *match = actual.is_boolean() && actual.get<bool>() == rhs.get<bool>(); return true; }
-            double af, rf;
+            uint32_t af, rf;
             bool aok = asNumber(actual, &af), rok = asNumber(rhs, &rf);
             *match = aok && rok && (af == rf);
             return true;
         } else if (operand == "!=") {
             if (rhs.is_string()) { *match = actual.is_string() && actual.get<std::string>() != rhs.get<std::string>(); return true; }
             if (rhs.is_boolean()) { *match = actual.is_boolean() && actual.get<bool>() != rhs.get<bool>(); return true; }
-            double af, rf;
+            uint32_t af, rf;
             bool aok = asNumber(actual, &af), rok = asNumber(rhs, &rf);
             *match = aok && rok && (af != rf);
             return true;
         } else if (operand == ">" || operand == ">=" || operand == "<" || operand == "<=") {
-            double af, rf;
+            uint32_t af, rf;
             bool aok = asNumber(actual, &af), rok = asNumber(rhs, &rf);
             *match = false;
             if (!aok || !rok) return true; // not comparable => false
@@ -160,6 +162,88 @@ static std::string lower(const std::string& s) {
         }
         return false;
     }
+
+    bool cmpBytes(const detersl::types::Bytes& actual, const std::string& operand, const json& rhs, bool* match) {
+        const auto& vec = actual.as_vec();
+
+        auto bytes_equal_raw = [&vec](const uint8_t* data, size_t size) -> bool {
+            //strict equality only: same size and same bytes
+            if (vec.size() != size) return false;
+            if (size == 0) return true;
+            return std::memcmp(vec.data(), data, size) == 0;
+        };
+
+        auto bytes_to_bool = [&vec](bool* out) -> bool {
+            // interpret the bytes as a boolean: either a single byte of value 0 or 1, or the ASCII string "0" or "1"
+            if (vec.empty()) return false;
+
+            const uint8_t* data = vec.data();
+            const size_t size = vec.size();
+
+            if (size == 1) {
+                if (data[0] == 0 || data[0] == 1) { *out = (data[0] == 1); return true; }
+                if (data[0] == '0' || data[0] == '1') { *out = (data[0] == '1'); return true; }
+            }
+            return false;
+        };
+
+        auto bytes_to_number = [&vec](uint32_t* out) -> bool {
+            //TODO : fix this to handle integers other than 32 bit unsigned little endian
+            if (vec.empty()) return false;
+            memcpy(out, vec.data(), 4);
+            return true;
+        };
+
+        if (operand == "==" || operand == "eq" || operand == "!=") {
+            bool eq = false;
+            bool comparable = true;
+
+            if (rhs.is_string()) {
+                const auto& rhs_str = rhs.get_ref<const std::string&>();
+                eq = bytes_equal_raw(reinterpret_cast<const uint8_t*>(rhs_str.data()), rhs_str.size());
+            } else if (rhs.is_boolean()) {
+                bool bv = false;
+                if (!bytes_to_bool(&bv)) {
+                    comparable = false;
+                } else {
+                    eq = (bv == rhs.get<bool>());
+                }
+            } 
+            else {
+                uint32_t rf = 0;
+                uint32_t af = 0;
+                if (!asNumber(rhs, &rf) || !bytes_to_number(&af)) {
+                    comparable = false;
+                } else {
+                    eq = (af == rf);
+                }
+            }
+
+            if (!comparable) { *match = false; return true; }
+            *match = (operand == "!=") ? !eq : eq;
+            return true;
+        } else if (operand == ">" || operand == ">=" || operand == "<" || operand == "<=") {
+            uint32_t rf = 0;
+            uint32_t af = 0;
+            if (!asNumber(rhs, &rf) || !bytes_to_number(&af)) { *match = false; return true; }
+            if (operand == ">")  *match = af > rf;
+            if (operand == ">=") *match = af >= rf;
+            if (operand == "<")  *match = af < rf;
+            if (operand == "<=") *match = af <= rf;
+            return true;
+        } else if (operand == "bool") {
+            if (!rhs.is_boolean()) return false;
+            bool bv = false;
+            if (!bytes_to_bool(&bv)) { *match = false; return true; }
+            *match = bv == rhs.get<bool>();
+            return true;
+        } else if (operand == "default") {
+            *match = true;
+            return true;
+        }
+        return false;
+    }
+
 
     bool readByPath(const json& input, const std::string& path, json* out) {
         std::string p = path;

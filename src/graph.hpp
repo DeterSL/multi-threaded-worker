@@ -1,5 +1,6 @@
 #pragma once
 #include "types.hpp"
+#include "bytes.hpp"
 #include <string>
 #include <vector>
 #include <optional>
@@ -46,4 +47,5 @@ namespace detersl::worker {
     // helpers exposed for tests
     bool readByPath(const json& input, const std::string& path, json* out);
     bool cmp(const json& actual, const std::string& operand, const json& rhs, bool* match);
+    bool cmpBytes(const detersl::types::Bytes& actual, const std::string& operand, const json& rhs, bool* match);
 } // namespace detersl::worker

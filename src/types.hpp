@@ -6,6 +6,12 @@
 #include <utility>
 #include <vector>
 #include <nlohmann/json.hpp>
+#include <iostream>
+#include <cpp/when.h>
+#include <verona.h>
+
+using namespace verona::rt;
+using namespace verona::cpp;
 
 using json = nlohmann::json;
 
@@ -67,6 +73,20 @@ namespace detersl {
             std::string WorkflowID;                   // json:"workflow_id"
             std::string Input;                         // json:"input"
             std::string RequestID;                     // json:"request_id"
+        };
+
+        struct ChoiceControl {
+            bool decided = false;
+            size_t selected = 0;
+
+            ~ChoiceControl(){
+                std::cout << "ChoiceControl destructor called" << std::endl;
+            }
+        };
+
+        struct BranchGuard {
+            cown_ptr<ChoiceControl> control;
+            size_t edge_index;
         };
 
         // ---------- nlohmann::json (de)serialization ----------
