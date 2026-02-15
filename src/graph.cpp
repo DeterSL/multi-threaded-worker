@@ -4,12 +4,12 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <iostream>
 
 namespace detersl::worker {
 
 using detersl::types::Workflow;
-using detersl::types::WorkflowRequest;
 using detersl::types::State;
 using detersl::types::Choice;
 
@@ -20,7 +20,9 @@ static std::string lower(const std::string& s) {
     }
 
     std::string Node::ID() const {
-        if (!Resource.empty()) return Type + ":" + Resource;
+        if (!WorkflowID.empty() && !StateID.empty()) return WorkflowID + ":" + StateID;
+        if (!StateID.empty()) return StateID;
+        if (!WorkflowID.empty()) return WorkflowID + ":" + Type;
         return Type;
     }
 
@@ -36,85 +38,106 @@ static std::string lower(const std::string& s) {
         return false;
     }
 
-    static Node* buildGraph(const std::string& key, const Workflow& wf,
-                            std::map<std::string, Node*>& cache, std::string* err) {
-        if (auto it = cache.find(key); it != cache.end()) return it->second;
-        auto it = wf.States.find(key);
-        if (it == wf.States.end()) {
-            if (err) *err = "dangling reference to state \"" + key + "\"";
-            return nullptr;
-        }
-        const State& st = it->second;
-        Node* n = new Node{
-            .WorkflowID = wf.ID,
-            .Type = st.Type,
-            .Resource = st.Resource,
-            .FuncID = st.FuncID,
-            .Resources = st.Resources,
-            .End = st.End,
-            .Input = "",
-            .Result = st.Result.is_null() ? std::string{} : st.Result.dump(), // <--- FIX
-            .Next = nullptr,
-            .Choices = {},
-            .RuntimeBase = st.RuntimeBase
-        };
-        cache[key] = n;
+    static Node* buildSequence(const std::string& workflow_id,
+                               const std::vector<State>& states,
+                               std::string* err) {
+        if (states.empty()) return nullptr;
 
-        const std::string t = lower(st.Type);
-        if (t == "task" || t == "pass") {
-            if (!st.Next.empty()) {
-                Node* child = buildGraph(st.Next, wf, cache, err);
-                if (!child) return nullptr;
-                n->Next = child;
-            }
-        } else if (t == "choice") {
-            std::vector<ChoiceEdge> edges;
-            edges.reserve(st.Choices.size() + 1);
-            for (const auto& c : st.Choices) {
-                if (c.Variable.empty()) {
-                    if (err) *err = "choice \"" + key + "\" rule missing variable";
+        Node* next = nullptr;
+        for (size_t idx = states.size(); idx-- > 0;) {
+            const State& st = states[idx];
+            const std::string state_id = std::to_string(idx);
+
+            Node* n = new Node{
+                .WorkflowID = workflow_id,
+                .StateID = state_id,
+                .Type = st.Type,
+                .FuncID = st.FuncID,
+                .Resources = st.Resources,
+                .End = false,
+                .Next = nullptr,
+                .Choices = {},
+            };
+
+            const std::string t = lower(st.Type);
+            if (t == "task" || t == "pass") {
+                n->Next = next;
+                n->End = (next == nullptr);
+            } else if (t == "choice") {
+                if (idx + 1 != states.size()) {
+                    if (err) *err = "choice at index " + state_id + " must be the last state in the list";
                     return nullptr;
                 }
-                std::string op; json val;
-                std::string terr;
-                if (!toOperandValue(c, op, val, terr)) {
-                    if (err) *err = "choice \"" + key + "\": " + terr;
+                if (st.Choices.empty()) {
+                    if (err) *err = "choice at index " + state_id + " has no choices";
                     return nullptr;
                 }
-                Node* child = buildGraph(c.Next, wf, cache, err);
-                if (!child) return nullptr;
+                std::vector<ChoiceEdge> edges;
+                edges.reserve(st.Choices.size());
+                for (const auto& c : st.Choices) {
+                    if (c.Variable.empty()) {
+                        if (err) *err = "choice at index " + state_id + " rule missing variable";
+                        return nullptr;
+                    }
+                    std::string op; json val;
+                    std::string terr;
+                    if (!toOperandValue(c, op, val, terr)) {
+                        if (err) *err = "choice at index " + state_id + ": " + terr;
+                        return nullptr;
+                    }
+                    Node* child = buildSequence(workflow_id, c.States, err);
+                    if (!child && err && !err->empty()) return nullptr;
 
-                edges.push_back(ChoiceEdge{c.Variable, op, val, child});
-            }
-            if (!st.Default.empty()) {
-                Node* child = buildGraph(st.Default, wf, cache, err);
-                if (!child) return nullptr;
-                edges.push_back(ChoiceEdge{"","default",nullptr, child});
-            }
-
-            // Deterministic sorting like Go: by Next.ID(), then Variable, then Operand.
-            std::sort(edges.begin(), edges.end(), [](const ChoiceEdge& a, const ChoiceEdge& b){
-                const std::string idi = a.Next ? a.Next->ID() : "";
-                const std::string idj = b.Next ? b.Next->ID() : "";
-                if (idi == idj) {
-                    if (a.Variable == b.Variable) return a.Operand < b.Operand;
-                    return a.Variable < b.Variable;
+                    edges.push_back(ChoiceEdge{c.Variable, op, val, child});
                 }
-                return idi < idj;
-            });
-            n->Choices = std::move(edges);
-        } else {
-            if (err) *err = "unknown choice type \"" + st.Type + "\"";
-            return nullptr;
+                if (!st.Default.empty()) {
+                    // Default branch ends with no additional states.
+                    edges.push_back(ChoiceEdge{"", "default", nullptr, nullptr});
+                }
+
+                // Deterministic sorting like Go: by Next.ID(), then Variable, then Operand.
+                std::sort(edges.begin(), edges.end(), [](const ChoiceEdge& a, const ChoiceEdge& b){
+                    const std::string idi = a.Next ? a.Next->ID() : "";
+                    const std::string idj = b.Next ? b.Next->ID() : "";
+                    if (idi == idj) {
+                        if (a.Variable == b.Variable) return a.Operand < b.Operand;
+                        return a.Variable < b.Variable;
+                    }
+                    return idi < idj;
+                });
+                n->Choices = std::move(edges);
+            } else {
+                if (err) *err = "unknown node type \"" + st.Type + "\"";
+                return nullptr;
+            }
+
+            next = n;
         }
-        return n;
+        return next;
     }
 
     Node* BuildFromWorkflow(const Workflow& workflow, std::string* err) {
-        std::map<std::string, Node*> cache;
-        Node* root = buildGraph(workflow.StartAt, workflow, cache, err);
+        std::string local_err;
+        std::string* errp = err ? err : &local_err;
+        errp->clear();
+
+        if (workflow.States.empty()) {
+            *errp = "workflow has no states";
+            return nullptr;
+        }
+
+        Node* root = buildSequence(workflow.ID, workflow.States, errp);
         if (!root) {
-            if (err) *err = "failed to build graph: " + *err;
+            if (!errp->empty()) {
+                if (err) *err = "failed to build graph: " + *errp;
+                return nullptr;
+            }
+            *errp = "workflow has no states";
+            if (err) *err = "failed to build graph: " + *errp;
+            return nullptr;
+        }
+        if (!errp->empty()) {
+            if (err) *err = "failed to build graph: " + *errp;
             return nullptr;
         }
         return root;
@@ -243,129 +266,4 @@ static std::string lower(const std::string& s) {
         }
         return false;
     }
-
-
-    bool readByPath(const json& input, const std::string& path, json* out) {
-        std::string p = path;
-        // Trim
-        p.erase(p.begin(), std::find_if(p.begin(), p.end(), [](unsigned char c){ return !std::isspace(c);} ));
-        p.erase(std::find_if(p.rbegin(), p.rend(), [](unsigned char c){ return !std::isspace(c);}).base(), p.end());
-
-        if (p.empty() || p == "$") { *out = input; return true; }
-        if (p.rfind("$.", 0) != 0) return false;
-
-        const std::string rest = p.substr(2);
-        auto parts = std::vector<std::string>{};
-        size_t start = 0, pos;
-        while ((pos = rest.find('.', start)) != std::string::npos) {
-            parts.emplace_back(rest.substr(start, pos - start));
-            start = pos + 1;
-        }
-        parts.emplace_back(rest.substr(start));
-
-        json cur = input;
-        for (const auto& seg : parts) {
-            if (!cur.is_object()) return false;
-            if (!cur.contains(seg)) return false;
-            cur = cur[seg];
-        }
-        *out = cur;
-        return true;
-    }
-
-    static bool get_child_count(const Node* node, size_t* count, std::string* err){
-        if (!node || !count) {
-            if (err) *err = "internal workflow scheduling error";
-            return false;
-        }
-
-        std::string type_lower = node->Type;
-        std::transform(type_lower.begin(), type_lower.end(), type_lower.begin(), ::tolower);
-        if (type_lower == "task" || type_lower == "pass") {
-            *count = node->Next ? 1 : 0;
-            return true;
-        }
-        if (type_lower == "choice") {
-            *count = node->Choices.size();
-            return true;
-        }
-
-        if (err) *err = "unknown node type \"" + node->Type + "\"";
-        return false;
-    }
-
-    static bool get_child_at(const Node* node, size_t index, const Node** child, std::string* err){
-        if (!node || !child) {
-            if (err) *err = "internal workflow scheduling error";
-            return false;
-        }
-
-        std::string type_lower = node->Type;
-        std::transform(type_lower.begin(), type_lower.end(), type_lower.begin(), ::tolower);
-        if (type_lower == "task" || type_lower == "pass") {
-            if (index != 0) {
-            *child = nullptr;
-            return true;
-            }
-            *child = node->Next;
-            return true;
-        }
-        if (type_lower == "choice") {
-            if (index >= node->Choices.size()) {
-            *child = nullptr;
-            return true;
-            }
-            *child = node->Choices[index].Next;
-            return true;
-        }
-
-        if (err) *err = "unknown node type \"" + node->Type + "\"";
-        return false;
-    }
-
-    bool detect_cycle(Node* root, std::string* err){
-        std::unordered_set<const Node*> visiting;
-        if (!root) return true;
-
-        visiting.clear();
-        std::unordered_set<const Node*> visited;
-
-        struct Frame {
-            const Node* node;
-            size_t next_index;
-        };
-
-        std::vector<Frame> stack;
-        stack.push_back({root, 0});
-        visiting.insert(root);
-
-        while (!stack.empty()) {
-            Frame& frame = stack.back();
-            const Node* node = frame.node;
-            size_t child_count = 0;
-            if (!get_child_count(node, &child_count, err)) return false;
-
-            if (frame.next_index < child_count) {
-            const Node* child = nullptr;
-            if (!get_child_at(node, frame.next_index, &child, err)) return false;
-            frame.next_index++;
-            if (!child) continue;
-            if (visited.count(child) != 0) continue;
-            if (visiting.count(child) != 0) {
-                if (err) *err = "cycle detected in workflow graph";
-                return false;
-            }
-            visiting.insert(child);
-            stack.push_back({child, 0});
-            continue;
-            }
-
-            visiting.erase(node);
-            visited.insert(node);
-            stack.pop_back();
-        }
-        return true;
-    }
-
-
 } // namespace detersl::worker

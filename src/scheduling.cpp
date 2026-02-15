@@ -430,6 +430,7 @@ static bool schedule_choice_node(const Node* node,
       return;
     }
 
+    cown->selected = static_cast<size_t>(-1);
     cown->decided = true;
   };
 
@@ -454,7 +455,6 @@ static bool schedule_choice_node(const Node* node,
 
 static bool schedule_graph(Node* node,
                            const nlohmann::json& input,
-                           const nlohmann::json& resources,
                            const std::string& request_id,
                            std::string* err)
 {
@@ -462,9 +462,6 @@ static bool schedule_graph(Node* node,
   std::unordered_map<const Node*, cown_ptr<detersl::types::ChoiceControl>> choice_controls;
 
   if (!node) return true;
-  if (!detect_cycle(node, err)) {
-    return false;
-  }
 
   struct QueueItem {
     Node* node;
@@ -501,7 +498,7 @@ static bool schedule_graph(Node* node,
         return false;
       }
       visited.insert(item);
-      if (!run_task_node(item.node, resources, request_id, &workflow_resources, active_guard, err)) {
+      if (!run_task_node(item.node, input, request_id, &workflow_resources, active_guard, err)) {
         return false;
       }
       if (item.node->End) {
@@ -527,7 +524,7 @@ static bool schedule_graph(Node* node,
       if (it == choice_controls.end()) {
         control = make_cown<detersl::types::ChoiceControl>();
         choice_controls.emplace(item.node, control);
-        if(!schedule_choice_node(item.node, resources, request_id, &workflow_resources, control, active_guard, err)) {
+        if(!schedule_choice_node(item.node, input, request_id, &workflow_resources, control, active_guard, err)) {
           return false;
         }
       } else {
@@ -612,24 +609,13 @@ bool schedule_workflow(const detersl::types::WorkflowRequest& request, std::stri
     return false;
   }
 
-  if (!invocation.is_object() || !invocation.contains("resources")) {
-    if (err) *err = "workflow input must include resources";
-    return false;
-  }
-
-  const auto& resources = invocation.at("resources");
-  if (!resources.is_object()) {
-    if (err) *err = "workflow resources must be an object";
-    return false;
-  }
-
   auto it = workflow_registry.find(request.WorkflowID);
   if (it == workflow_registry.end()) {
     if (err) *err = "unknown workflow id: " + request.WorkflowID;
     return false;
   }
   Node* root = it->second;
-  return schedule_graph(root, invocation, resources, request.RequestID, err);
+  return schedule_graph(root, invocation, request.RequestID, err);
 }
 
 bool invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err)

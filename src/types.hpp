@@ -21,6 +21,20 @@ namespace detersl {
         using FunctionInput = std::string;
         using FunctionType = FunctionOutput (*)(FunctionInput);
 
+        struct Choice;
+
+        struct State {
+            std::string Type;                          // json:"type"
+            std::optional<int> FuncID;                 // json:"func_id,omitempty"
+            std::map<std::string, std::string> Resources; // json:"resources,omitempty"
+            std::vector<Choice> Choices;               // json:"choices,omitempty"
+            std::string Default;                       // json:"default,omitempty"
+            // Match Go semantics: return the same underlying container (no copy)
+            const std::vector<Choice>& ChoicesClean() const {
+                return Choices;
+            }
+        };
+
         struct Choice {
             std::string Variable;                      // json:"variable"
             std::optional<double> NumericEq;           // json:"numeric_eq"
@@ -30,38 +44,17 @@ namespace detersl {
             std::optional<double> NumericLTE;          // json:"numeric_lte"
             std::optional<std::string> StringEq;       // json:"string_eq"
             std::optional<bool> BoolEq;                // json:"bool_eq"
-            std::string Next;                          // json:"next"
-        };
-
-        struct State {
-            std::string Type;                          // json:"type"
-            std::string Resource;                      // json:"resource,omitempty"
-            std::optional<int> FuncID;                 // json:"func_id,omitempty"
-            std::map<std::string, std::string> Resources; // json:"resources,omitempty"
-            json Result;                               // json:"result,omitempty"
-            std::string Next;                          // json:"next,omitempty"
-            bool End{false};                           // json:"end,omitempty"
-            std::vector<Choice> Choices;               // json:"choices,omitempty"
-            std::string Default;                       // json:"default,omitempty"
-
-            // NEW: Enriched runtime base config JSON (kept alongside resource for compatibility)
-            std::string RuntimeBase;                   // json:"runtime_base,omitempty"
-
-            // Match Go semantics: return the same underlying container (no copy)
-            const std::vector<Choice>& ChoicesClean() const {
-                return Choices;
-            }
+            std::vector<State> States;                 // json:"states"
         };
 
         struct Workflow {
             std::string ID;                            // json:"id"
-            std::string StartAt;                       // json:"start_at"
-            std::map<std::string, State> States;       // json:"states"
+            std::vector<State> States;                 // json:"states"
         };
 
         struct DeployDTO {
             std::string StartAt;                       // json:"start_at"
-            std::map<std::string, State> States;       // json:"states"
+            std::vector<State> States;                 // json:"states"
         };
 
         struct InvokeDTO {
@@ -90,6 +83,8 @@ namespace detersl {
         };
 
         // ---------- nlohmann::json (de)serialization ----------
+        inline void to_json(json& j, const State& v);
+        inline void from_json(const json& j, State& v);
 
         inline void to_json(json& j, const Choice& v) {
             j = json::object();
@@ -101,7 +96,7 @@ namespace detersl {
             if (v.NumericLTE) j["numeric_lte"] = *v.NumericLTE;
             if (v.StringEq)   j["string_eq"]   = *v.StringEq;
             if (v.BoolEq)     j["bool_eq"]     = *v.BoolEq;
-            j["next"] = v.Next;
+            j["states"] = v.States;
         }
 
         inline void from_json(const json& j, Choice& v) {
@@ -113,47 +108,35 @@ namespace detersl {
             if (j.contains("numeric_lte")) v.NumericLTE = j.at("numeric_lte").get<double>();
             if (j.contains("string_eq"))   v.StringEq   = j.at("string_eq").get<std::string>();
             if (j.contains("bool_eq"))     v.BoolEq     = j.at("bool_eq").get<bool>();
-            v.Next = j.at("next").get<std::string>();
+            v.States = j.at("states").get<std::vector<State>>();
         }
 
         inline void to_json(json& j, const State& v) {
             j = json::object();
             j["type"] = v.Type;
-            if (!v.Resource.empty())     j["resource"] = v.Resource;
             if (v.FuncID)                j["func_id"] = *v.FuncID;
             if (!v.Resources.empty())    j["resources"] = v.Resources;
-            if (!v.Result.is_null())     j["result"] = v.Result;
-            if (!v.Next.empty())         j["next"] = v.Next;
-            if (v.End)                   j["end"] = v.End;
             if (!v.Choices.empty())      j["choices"] = v.Choices;
             if (!v.Default.empty())      j["default"] = v.Default;
-            if (!v.RuntimeBase.empty())  j["runtime_base"] = v.RuntimeBase;
         }
 
         inline void from_json(const json& j, State& v) {
             v.Type = j.at("type").get<std::string>();
-            if (j.contains("resource"))      v.Resource = j.at("resource").get<std::string>();
             if (j.contains("func_id"))       v.FuncID = j.at("func_id").get<int>();
             if (j.contains("resources"))     v.Resources = j.at("resources").get<std::map<std::string, std::string>>();
-            if (j.contains("result"))        v.Result = j.at("result");
-            if (j.contains("next"))          v.Next = j.at("next").get<std::string>();
-            if (j.contains("end"))           v.End = j.at("end").get<bool>();
             if (j.contains("choices"))       v.Choices = j.at("choices").get<std::vector<Choice>>();
             if (j.contains("default"))       v.Default = j.at("default").get<std::string>();
-            if (j.contains("runtime_base"))  v.RuntimeBase = j.at("runtime_base").get<std::string>();
         }
 
         inline void to_json(json& j, const Workflow& v) {
             j = json::object();
             if (!v.ID.empty()) j["id"] = v.ID;
-            j["start_at"] = v.StartAt;
             j["states"] = v.States;
         }
 
         inline void from_json(const json& j, Workflow& v) {
             if (j.contains("id")) v.ID = j.at("id").get<std::string>();
-            v.StartAt = j.at("start_at").get<std::string>();
-            v.States  = j.at("states").get<std::map<std::string, State>>();
+            v.States  = j.at("states").get<std::vector<State>>();
         }
 
         inline void to_json(json& j, const DeployDTO& v) {
@@ -164,7 +147,7 @@ namespace detersl {
 
         inline void from_json(const json& j, DeployDTO& v) {
             v.StartAt = j.at("start_at").get<std::string>();
-            v.States  = j.at("states").get<std::map<std::string, State>>();
+            v.States  = j.at("states").get<std::vector<State>>();
         }
 
         inline void to_json(json& j, const InvokeDTO& v) {
