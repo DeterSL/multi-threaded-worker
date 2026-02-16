@@ -66,10 +66,6 @@ namespace detersl {
         struct ChoiceControl {
             bool decided = false;
             size_t selected = 0;
-
-            ~ChoiceControl(){
-                std::cout << "ChoiceControl destructor called" << std::endl;
-            }
         };
 
         struct BranchGuard {

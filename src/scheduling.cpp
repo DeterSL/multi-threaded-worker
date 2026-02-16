@@ -34,18 +34,19 @@ int next_wasm_func_id = 1;
 std::unordered_map<std::string, Node*> workflow_registry;
 int next_workflow_request_id = 1;
 
-static std::string trim_copy(std::string input) {
-  const auto not_space = [](unsigned char c) { return !std::isspace(c); };
-  input.erase(input.begin(), std::find_if(input.begin(), input.end(), not_space));
-  input.erase(std::find_if(input.rbegin(), input.rend(), not_space).base(), input.end());
-  return input;
-}
-
 static bool parse_resource_placeholder(const std::string& placeholder,
                                        bool &immediate_val,
                                        std::string& name,
                                        bool &read_only,
                                        std::string* err) {
+                                        
+  auto trim_copy = [](std::string input) {
+    const auto not_space = [](unsigned char c) { return !std::isspace(c); };
+    input.erase(input.begin(), std::find_if(input.begin(), input.end(), not_space));
+    input.erase(std::find_if(input.rbegin(), input.rend(), not_space).base(), input.end());
+    return input;
+  };
+  
   const auto trimmed = trim_copy(placeholder);
   if (trimmed.size() < 2) {
     if (err) *err = "invalid resource placeholder: " + placeholder;
@@ -121,7 +122,7 @@ static bool resolve_choice_resources(const Node* node,
 
     seen.insert(entry.Variable);
     bool immediate_val = false;
-    bool is_read_only = false;
+    bool is_read_only = false; //not used since everything here is read_only anyways
     std::string key;
     std::string parse_err;
     if (!parse_resource_placeholder(entry.Variable, immediate_val, key, is_read_only, &parse_err)) {
@@ -163,7 +164,7 @@ static bool resolve_choice_resources(const Node* node,
   return true;  
 }
 
-static bool resolve_resources(const Node* node,
+static bool resolve_task_resources(const Node* node,
                               const nlohmann::json& invocation_resources,
                               const std::string &request_id,
                               std::unordered_map<std::string, std::string>& resolved,
@@ -225,7 +226,6 @@ static bool resolve_resources(const Node* node,
 }
 
 static void schedule_function(detersl::func::WasmFuncInfo func_info,
-                                      detersl::func::WasmFunc func, 
                                       std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>& workflow_resources,
                                       const detersl::types::BranchGuard* guard)
 {
@@ -253,7 +253,6 @@ static void schedule_function(detersl::func::WasmFuncInfo func_info,
 
     if (resource_map.find(res_name) == resource_map.end())
     {
-      std::cout << "Creating new cown for resource: " << res_name << std::endl;
       resource_map[res_name] = std::make_pair(make_cown<detersl::types::Resource>(), 0);
     }
 
@@ -270,8 +269,8 @@ static void schedule_function(detersl::func::WasmFuncInfo func_info,
   cown_array<detersl::types::Resource> rw_cowns{read_write_resources, num_rw_res};
   cown_array<detersl::types::Resource> ro_cowns{read_only_resources, num_ro_res};
 
-  auto run = [func_info, func, local_ref_counts](auto rw_c, auto ro_c) {
-    detersl::runner::WasmRunner runner(rw_c, ro_c, func_info, func);
+  auto run = [func_info, local_ref_counts](auto rw_c, auto ro_c) {
+    detersl::runner::WasmRunner runner(rw_c, ro_c, func_info);
 
       // TODO: maybe a return code of function?
       // Like previous version
@@ -287,7 +286,6 @@ static void schedule_function(detersl::func::WasmFuncInfo func_info,
     size_t guard_edge = guard->edge_index;
     when(rw_cowns, read(ro_cowns), read(guard_cown)) << [guard_edge, run, func_info](auto rw_c, auto ro_c, auto guard_c) {  
       if (!guard_c->decided || guard_c->selected != guard_edge) {
-        std::cout << "Skipping function " << func_info.func_name << "\n";
         return;
       }
       run(rw_c, ro_c);
@@ -320,7 +318,7 @@ static bool run_task_node(Node* node,
   std::unordered_map<std::string, std::string> resolved;
   std::unordered_set<std::string> read_only;
   std::unordered_map<std::string, nlohmann::json> value_inputs;
-  if (!resolve_resources(node, invocation_resources, request_id, resolved, read_only, value_inputs, workflow_resources, err)) {
+  if (!resolve_task_resources(node, invocation_resources, request_id, resolved, read_only, value_inputs, workflow_resources, err)) {
     return false;
   }
 
@@ -350,8 +348,7 @@ static bool run_task_node(Node* node,
   }
   func_info.func_input_event.data = input_payload.dump();
 
-  detersl::func::WasmFunc func(func_info);
-  schedule_function(func_info, func, workflow_resources, guard);
+  schedule_function(func_info, workflow_resources, guard);
   return true;
 }
 
@@ -387,7 +384,6 @@ static bool schedule_choice_node(const Node* node,
       continue; 
       } 
     if (resource_map.find(res_name) == resource_map.end()) { 
-        std::cout << "Creating new cown for resource: " << res_name << std::endl; 
         resource_map[res_name] = std::make_pair(make_cown<detersl::types::Resource>(), 0); 
     } 
     resource_cowns[i] = resource_map[res_name].first; 
@@ -544,6 +540,7 @@ static bool schedule_graph(Node* node,
 
   return true;
 }
+
 int register_wasm_function(const nlohmann::json& j, std::string* err, int* func_id)
 {
 
@@ -562,12 +559,13 @@ int register_wasm_function(const nlohmann::json& j, std::string* err, int* func_
     
     
     detersl::func::WasmFuncInfo info = detersl::func::WasmFuncInfo::from_json(j);
-    const int id = next_wasm_func_id++;
-    wasm_func_registry[id] = std::move(info);
-    if (func_id) *func_id = id;
 
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     std::cout << "Function " << info.func_name << " compiled in " << duration << " ms\n";
+    
+    const int id = next_wasm_func_id++;
+    wasm_func_registry[id] = std::move(info);
+    if (func_id) *func_id = id;
 
     return 0;
   } catch (const rust::Error& e) {

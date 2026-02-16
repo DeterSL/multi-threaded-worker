@@ -217,27 +217,5 @@ struct WasmFuncInfo : public BasicFuncInfo {
         return j;
     }
 };
-
-class WasmFunc {
-public:
-    explicit WasmFunc(WasmFuncInfo wasm_func_info)
-      : wasm_func_info_(std::move(wasm_func_info)) {}
-
-    static WasmFunc from_json(const nlohmann::json& j) {
-        return WasmFunc(WasmFuncInfo::from_json(j));
-    }
-
-    static WasmFunc from_json(const std::string& json_text) {
-        return WasmFunc(WasmFuncInfo::from_json(json_text));
-    }
-
-    nlohmann::json to_json() const {
-        return wasm_func_info_.to_json();
-    }
-
-private:
-    WasmFuncInfo wasm_func_info_;
-};
-
 } // namespace detersl::func
 
