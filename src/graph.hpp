@@ -25,27 +25,18 @@ namespace detersl::worker {
 
     struct Node {
         std::string WorkflowID;
+        std::string StateID;
         std::string Type;
-        std::string Resource;
         std::optional<int> FuncID;
         std::map<std::string, std::string> Resources;
         bool End{false};
-        std::string Input;   // raw JSON string
-        std::string Result;  // raw JSON string
         Node* Next{nullptr};
         std::vector<ChoiceEdge> Choices;
-
-        std::string RuntimeBase;
-
         std::string ID() const;
     };
 
     Node* BuildFromWorkflow(const detersl::types::Workflow& request, std::string* err);
 
-    bool detect_cycle(Node* root, std::string* err);
-
-    // helpers exposed for tests
-    bool readByPath(const json& input, const std::string& path, json* out);
     bool cmp(const json& actual, const std::string& operand, const json& rhs, bool* match);
     bool cmpBytes(const detersl::types::Bytes& actual, const std::string& operand, const json& rhs, bool* match);
 } // namespace detersl::worker

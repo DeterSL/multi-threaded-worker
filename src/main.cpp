@@ -10,8 +10,6 @@ rust::Box<DeterSLEngine> engine = new_detersl_engine(1024);
 
 int main(int argc, char **argv)
 {
-  std::cout << "Hello from the detersl-worker with thread id : " << std::this_thread::get_id() << "\n";
-
   ThreadPool<SchedulerThread>& sched = Scheduler::get();
   //Scheduler::set_detect_leaks(true);
   //sched.set_fair(true);

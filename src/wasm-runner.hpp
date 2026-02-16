@@ -25,23 +25,6 @@ namespace detersl {
                     acquired_cown_span<const detersl::types::Resource> ro_cown_arr,
                     detersl::func::WasmFuncInfo func_info) : 
                     func_info_(func_info),
-                    func_(func_info),
-                    Runner(rw_cown_arr, ro_cown_arr, func_info) {
-                        if (!worker_excutioner) {
-                            // Threre is no executioner on this thread.
-                            // Lets make it
-                            worker_excutioner = new executioner::WasmExecution(*engine, new kv::WasmExecEnvKV());
-                        }
-
-                        worker_excutioner->get_kv()->reinitialize(std::move(storage));
-                    }
-
-                WasmRunner(acquired_cown_span<detersl::types::Resource> rw_cown_arr,
-                        acquired_cown_span<const detersl::types::Resource> ro_cown_arr,
-                        detersl::func::WasmFuncInfo func_info,
-                        detersl::func::WasmFunc func) : 
-                    func_info_(func_info),
-                    func_(func),
                     Runner(rw_cown_arr, ro_cown_arr, func_info) {
                         if (!worker_excutioner) {
                             // Threre is no executioner on this thread.
@@ -57,15 +40,15 @@ namespace detersl {
                 WasmRunner(WasmRunner&&) = delete;
                 WasmRunner& operator=(WasmRunner&&) = delete;
 
-                void set_func(detersl::func::WasmFunc func) {
-                    func_ = func;
+                void set_func(detersl::func::WasmFuncInfo func) {
+                    func_info_ = func;
                 }
 
                 void run() override {
                     try{
                         std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
                     
-                        worker_excutioner->execution_func(func_);
+                        worker_excutioner->execution_func(func_info_);
 
                         std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
                         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
@@ -84,7 +67,6 @@ namespace detersl {
 
             protected:
                 detersl::func::WasmFuncInfo func_info_;
-                detersl::func::WasmFunc func_;
         };
     }
 }

@@ -18,11 +18,11 @@ namespace detersl {
                 }
 
 
-                void execution_func(detersl::func::WasmFunc func) {
+                void execution_func(detersl::func::WasmFuncInfo func) {
                     const std::string config = func.to_json().dump();
                     
                     auto out = exec_->executioner_run_json(config);
-                    std::cout << "the value of the output is :" <<  std::string(out.begin(), out.end()) << std::endl;
+                    std::cout << "the output of function " << func.func_name << " is :" <<  std::string(out.begin(), out.end()) << std::endl;
 
                     // TODO: the function out can be anything
                     //func.set_output(out);

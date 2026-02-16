@@ -14,21 +14,6 @@ using namespace verona::cpp;
 
 namespace detersl::worker {
 
-void schedule_function(detersl::func::BasicFuncInfo func_state);
-
-void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::WasmFunc func);
-
-void schedule_function(detersl::func::WasmFuncInfo func_info, detersl::func::WasmFunc func, 
-                       std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>* workflow_resources);
-
-int parse_and_load(const std::string& func_name);
-
-void register_and_schedule();
-
-void hardcoded_test();
-
-void register_function(const std::string& name, detersl::types::FunctionType fn);
-
 void cleanup_resources();
 
 int register_wasm_function(const nlohmann::json& j, std::string* err, int* func_id);
@@ -36,6 +21,4 @@ int register_wasm_function(const nlohmann::json& j, std::string* err, int* func_
 int register_workflow(const detersl::types::Workflow& workflow, std::string* err);
 
 bool invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err);
-
-bool schedule_workflow(const detersl::types::WorkflowRequest& request, std::string* err);
 } // namespace detersl::worker

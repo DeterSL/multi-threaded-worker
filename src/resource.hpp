@@ -49,10 +49,6 @@ namespace detersl {
                     std::cout << "Freeing Resource data via free_data()" << std::endl;
                 }
 
-                ~Resource() {
-                    std::cout << "Resource destructor called" << std::endl;
-                }
-
             private:
                 detersl::types::Bytes data_;
         };
