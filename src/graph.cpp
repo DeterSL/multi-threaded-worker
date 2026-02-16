@@ -39,13 +39,13 @@ static std::string lower(const std::string& s) {
     }
 
     static Node* buildSequence(const std::string& workflow_id,
-                               const std::vector<State>& states,
+                               const std::vector<State>& tasks,
                                std::string* err) {
-        if (states.empty()) return nullptr;
+        if (tasks.empty()) return nullptr;
 
         Node* next = nullptr;
-        for (size_t idx = states.size(); idx-- > 0;) {
-            const State& st = states[idx];
+        for (size_t idx = tasks.size(); idx-- > 0;) {
+            const State& st = tasks[idx];
             const std::string state_id = std::to_string(idx);
 
             Node* n = new Node{
@@ -64,7 +64,7 @@ static std::string lower(const std::string& s) {
                 n->Next = next;
                 n->End = (next == nullptr);
             } else if (t == "choice") {
-                if (idx + 1 != states.size()) {
+                if (idx + 1 != tasks.size()) {
                     if (err) *err = "choice at index " + state_id + " must be the last state in the list";
                     return nullptr;
                 }
@@ -85,13 +85,13 @@ static std::string lower(const std::string& s) {
                         if (err) *err = "choice at index " + state_id + ": " + terr;
                         return nullptr;
                     }
-                    Node* child = buildSequence(workflow_id, c.States, err);
+                    Node* child = buildSequence(workflow_id, c.tasks, err);
                     if (!child && err && !err->empty()) return nullptr;
 
                     edges.push_back(ChoiceEdge{c.Variable, op, val, child});
                 }
                 if (!st.Default.empty()) {
-                    // Default branch ends with no additional states.
+                    // Default branch ends with no additional tasks.
                     edges.push_back(ChoiceEdge{"", "default", nullptr, nullptr});
                 }
 
@@ -121,18 +121,18 @@ static std::string lower(const std::string& s) {
         std::string* errp = err ? err : &local_err;
         errp->clear();
 
-        if (workflow.States.empty()) {
-            *errp = "workflow has no states";
+        if (workflow.tasks.empty()) {
+            *errp = "workflow has no tasks";
             return nullptr;
         }
 
-        Node* root = buildSequence(workflow.ID, workflow.States, errp);
+        Node* root = buildSequence(workflow.ID, workflow.tasks, errp);
         if (!root) {
             if (!errp->empty()) {
                 if (err) *err = "failed to build graph: " + *errp;
                 return nullptr;
             }
-            *errp = "workflow has no states";
+            *errp = "workflow has no tasks";
             if (err) *err = "failed to build graph: " + *errp;
             return nullptr;
         }

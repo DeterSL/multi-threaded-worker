@@ -44,17 +44,12 @@ namespace detersl {
             std::optional<double> NumericLTE;          // json:"numeric_lte"
             std::optional<std::string> StringEq;       // json:"string_eq"
             std::optional<bool> BoolEq;                // json:"bool_eq"
-            std::vector<State> States;                 // json:"states"
+            std::vector<State> tasks;                 // json:"tasks"
         };
 
         struct Workflow {
             std::string ID;                            // json:"id"
-            std::vector<State> States;                 // json:"states"
-        };
-
-        struct DeployDTO {
-            std::string StartAt;                       // json:"start_at"
-            std::vector<State> States;                 // json:"states"
+            std::vector<State> tasks;                 // json:"tasks"
         };
 
         struct InvokeDTO {
@@ -96,7 +91,7 @@ namespace detersl {
             if (v.NumericLTE) j["numeric_lte"] = *v.NumericLTE;
             if (v.StringEq)   j["string_eq"]   = *v.StringEq;
             if (v.BoolEq)     j["bool_eq"]     = *v.BoolEq;
-            j["states"] = v.States;
+            j["tasks"] = v.tasks;
         }
 
         inline void from_json(const json& j, Choice& v) {
@@ -108,7 +103,7 @@ namespace detersl {
             if (j.contains("numeric_lte")) v.NumericLTE = j.at("numeric_lte").get<double>();
             if (j.contains("string_eq"))   v.StringEq   = j.at("string_eq").get<std::string>();
             if (j.contains("bool_eq"))     v.BoolEq     = j.at("bool_eq").get<bool>();
-            v.States = j.at("states").get<std::vector<State>>();
+            v.tasks = j.at("tasks").get<std::vector<State>>();
         }
 
         inline void to_json(json& j, const State& v) {
@@ -131,23 +126,12 @@ namespace detersl {
         inline void to_json(json& j, const Workflow& v) {
             j = json::object();
             if (!v.ID.empty()) j["id"] = v.ID;
-            j["states"] = v.States;
+            j["tasks"] = v.tasks;
         }
 
         inline void from_json(const json& j, Workflow& v) {
             if (j.contains("id")) v.ID = j.at("id").get<std::string>();
-            v.States  = j.at("states").get<std::vector<State>>();
-        }
-
-        inline void to_json(json& j, const DeployDTO& v) {
-            j = json::object();
-            j["start_at"] = v.StartAt;
-            j["states"]   = v.States;
-        }
-
-        inline void from_json(const json& j, DeployDTO& v) {
-            v.StartAt = j.at("start_at").get<std::string>();
-            v.States  = j.at("states").get<std::vector<State>>();
+            v.tasks  = j.at("tasks").get<std::vector<State>>();
         }
 
         inline void to_json(json& j, const InvokeDTO& v) {
