@@ -54,12 +54,12 @@ namespace detersl {
 
         struct InvokeDTO {
             std::string WorkflowID;                    // json:"workflow_id"
-            std::string Input;                         // json:"input"
+            nlohmann::json Input;                         // json:"input"
         };
 
         struct WorkflowRequest {
             std::string WorkflowID;                   // json:"workflow_id"
-            std::string Input;                         // json:"input"
+            nlohmann::json Input;                         // json:"input"
             std::string RequestID;                     // json:"request_id"
         };
 
@@ -142,7 +142,7 @@ namespace detersl {
 
         inline void from_json(const json& j, InvokeDTO& v) {
             v.WorkflowID = j.at("workflow_id").get<std::string>();
-            v.Input      = j.at("input").get<std::string>();
+            v.Input      = j.at("input").get<nlohmann::json>();
         }
 
         inline void to_json(json& j, const WorkflowRequest& v) {
@@ -154,7 +154,7 @@ namespace detersl {
 
         inline void from_json(const json& j, WorkflowRequest& v) {
             v.WorkflowID  = j.at("workflow_id").get<std::string>();
-            v.Input     = j.at("input").get<std::string>();
+            v.Input     = j.at("input").get<nlohmann::json>();
             v.RequestID = j.at("request_id").get<std::string>();
         }
     }
