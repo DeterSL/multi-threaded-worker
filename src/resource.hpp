@@ -5,6 +5,7 @@
 #include <iostream>
 
 #include "bytes.hpp"
+#include "ffi.rs.h"
 
 namespace detersl {
     namespace types {
@@ -19,7 +20,7 @@ namespace detersl {
                 explicit Resource(detersl::types::Bytes&& data) : data_(std::move(data))
                 {}
 
-                explicit Resource(std::vector<uint8_t>&& data) : data_(std::move(data))
+                explicit Resource(rust::Vec<uint8_t>&& data) : data_(std::move(data))
                 {}
 
 
@@ -34,10 +35,6 @@ namespace detersl {
                 Resource& operator=(const Resource& t) {
                     data_ = t.data_;
                     return *this; 
-                }
-
-                void set_data(void *data, std::size_t size) {
-                    data_ = detersl::types::Bytes((uint8_t*)data, size);
                 }
 
                 void set_data(detersl::types::Bytes&& data) {

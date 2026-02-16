@@ -5,27 +5,22 @@
 #include <cstdint>
 #include <iterator>
 #include <memory>
-#include <vector>
+#include "ffi.rs.h"
+
 namespace detersl {
     namespace types {
 
-        template<typename Alloc = std::allocator<uint8_t>>
         struct BaseBytes {
             explicit BaseBytes() = default;
 
-            explicit BaseBytes(const std::vector<uint8_t>& in_bytes)
+            explicit BaseBytes(const rust::Vec<uint8_t>& in_bytes)
             {
                 std::copy(in_bytes.begin(), in_bytes.end(), std::back_inserter(data_));
             }
 
-            explicit BaseBytes(std::vector<uint8_t>&& in_bytes)
+            explicit BaseBytes(rust::Vec<uint8_t>&& in_bytes)
             {
                 data_ = std::move(in_bytes);
-            }
-
-            explicit BaseBytes(const uint8_t* data, std::size_t size)
-            {
-               data_.insert(data_.begin(), data, data + size); 
             }
 
             BaseBytes(const BaseBytes& other) 
@@ -40,7 +35,7 @@ namespace detersl {
 
             BaseBytes operator+(const BaseBytes& rhs)
             {
-                std::vector<uint8_t> result = data_;
+                rust::Vec<uint8_t> result = data_;
                 std::copy(rhs.data_.begin(), rhs.data_.end(), std::back_inserter(result));
                 return BaseBytes(std::move(result));
             }
@@ -63,18 +58,18 @@ namespace detersl {
 
             ~BaseBytes() {};
 
-            std::vector<uint8_t, Alloc>& as_vec() {
+            rust::Vec<uint8_t>& as_vec() {
                 return data_;
             }
 
-            const std::vector<uint8_t, Alloc>& as_vec() const {
+            const rust::Vec<uint8_t>& as_vec() const {
                 return data_;
             }
 
         private:
-            std::vector<uint8_t, Alloc> data_;
+            rust::Vec<uint8_t> data_;
         };
 
-        using Bytes = BaseBytes<>;
+        using Bytes = BaseBytes;
     }
 }

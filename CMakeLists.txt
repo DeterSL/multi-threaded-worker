@@ -123,24 +123,24 @@ endif()
 # Shared plugin
 # ------------------------------------------------------------
 # Get all cpp files under functions/
-file(GLOB FUNCTION_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/functions/*.cpp")
+# file(GLOB FUNCTION_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/functions/*.cpp")
 
-foreach(FN ${FUNCTION_SOURCES})
-    get_filename_component(BASENAME ${FN} NAME_WE)
+# foreach(FN ${FUNCTION_SOURCES})
+#     get_filename_component(BASENAME ${FN} NAME_WE)
 
-    add_library(${BASENAME} SHARED ${FN})
+#     add_library(${BASENAME} SHARED ${FN})
 
-    target_link_libraries(${BASENAME} PRIVATE
-        detersl_common
-        nlohmann_json::nlohmann_json
-    )
+#     target_link_libraries(${BASENAME} PRIVATE
+#         detersl_common
+#         nlohmann_json::nlohmann_json
+#     )
     
-    target_include_directories(${BASENAME} PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-    )
+#     target_include_directories(${BASENAME} PUBLIC
+#         ${CMAKE_CURRENT_SOURCE_DIR}/src
+#     )
 
-    set_target_properties(${BASENAME} PROPERTIES
-        PREFIX ""                         # removes 'lib'
-        POSITION_INDEPENDENT_CODE ON
-    )
-endforeach()
+#     set_target_properties(${BASENAME} PROPERTIES
+#         PREFIX ""                         # removes 'lib'
+#         POSITION_INDEPENDENT_CODE ON
+#     )
+# endforeach()
