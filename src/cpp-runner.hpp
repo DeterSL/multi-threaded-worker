@@ -39,8 +39,9 @@ namespace detersl {
                     func_ = func;
                 }
 
-                void run() override {
+                bool run() override {
                     func_();
+                    return true;
                 }
 
                 ~CPPRunner() = default;

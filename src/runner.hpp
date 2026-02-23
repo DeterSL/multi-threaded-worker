@@ -17,7 +17,7 @@ namespace detersl {
 
                 std::vector<std::string> get_deleted_resources();
 
-                virtual void run() = 0;
+                virtual bool run() = 0;
 
                 ~Runner();
 

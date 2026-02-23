@@ -44,7 +44,8 @@ namespace detersl {
                     func_info_ = func;
                 }
 
-                void run() override {
+                bool run() override{
+                    bool ok = true;
                     try{
                         std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
                     
@@ -55,14 +56,16 @@ namespace detersl {
                         std::cout << "Function " << func_info_.func_name << " executed in " << duration << " ms\n";
                     } catch (const std::exception& e) {
                         std::cerr << "Exception during WasmRunner run: " << e.what() << std::endl;
+                        ok = false;
                     }
 
                     // Bring back storage.
                     // The reason why we did not use shared ptr is that
                     // it is too slow for fast allocation and deallocation in a high dynamic env.
                     storage = std::move(worker_excutioner->get_kv()->move_resource_storage_out());
+                    return ok;
                 }
-
+ 
                 ~WasmRunner() = default;
 
             protected:

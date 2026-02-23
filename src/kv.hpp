@@ -28,6 +28,10 @@ namespace detersl {
                     if (value == local_resources_.end())
                         return nullptr;
 
+                    if (!value->second || value->second->is_deleted()) {
+                        return nullptr;
+                    }
+
                     return value->second;
                 }
 
@@ -56,8 +60,7 @@ namespace detersl {
                         std::cerr << "Trying to delete a read-only resource: " << key << std::endl;
                         return;
                     }
-                    local_resources_[key]->free_data();
-                    local_resources_.erase(key);
+                    local_resources_[key]->delete_data();
                 }
 
                 ~ResourceStorage() {

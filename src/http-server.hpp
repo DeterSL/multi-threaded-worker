@@ -10,10 +10,14 @@
 #include "types.hpp"
 #include "wasm-runner.hpp"
 #include "thread-safe-queue.hpp"
+#include "rust/cxx.h"
+#include <chrono>
 
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
+
+#define TIMEOUT_MS 3000
 
 namespace detersl::server {
     
@@ -128,6 +132,33 @@ void register_and_schedule_json(){
 
         res.status = 202;
         res.set_content("Workflow scheduled.\n", "text/plain");
+    });
+
+    server.Get("/resource/:res_name", [&](const httplib::Request& req, httplib::Response& res) {
+        std::string res_name = req.path_params.at("res_name");
+        std::future<rust::Vec<uint8_t>> res_data;
+        bool found = detersl::worker::get_resource(res_name, res_data);
+
+        if (!found) {
+            res.status = 404;
+            res.set_content("Resource not found.\n", "text/plain");
+            return;
+        }
+        const auto status = res_data.wait_for(std::chrono::milliseconds(TIMEOUT_MS));
+        if (status == std::future_status::timeout) {
+            res.status = 400;
+            res.set_content("Resource " + res_name + " could not be retrieved within timeout.\n", "text/plain");
+            return;
+        }
+
+        rust::Vec<uint8_t> data = res_data.get();
+        if(data.empty()) {
+            res.status = 204;
+            res.set_content("Resource " + res_name + " is empty.\n", "text/plain");
+            return;
+        }
+        res.status = 200;
+        res.set_content(reinterpret_cast<const char*>(data.data()), data.size(), "application/octet-stream");
     });
 
     std::cout << "Listening for WASM configs on http://0.0.0.0:6666\n";
