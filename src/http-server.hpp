@@ -146,7 +146,7 @@ void register_and_schedule_json(){
         }
         const auto status = res_data.wait_for(std::chrono::milliseconds(TIMEOUT_MS));
         if (status == std::future_status::timeout) {
-            res.status = 400;
+            res.status = 500;
             res.set_content("Resource " + res_name + " could not be retrieved within timeout.\n", "text/plain");
             return;
         }

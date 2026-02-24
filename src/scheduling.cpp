@@ -689,10 +689,12 @@ void cleanup_resources()
 }
 
 bool get_resource(const std::string &res_name, std::future<rust::Vec<uint8_t>>& res_data) {
-  if (resource_map.find(res_name) == resource_map.end()) {
+  auto it = resource_map.find(res_name);
+  
+  if (it == resource_map.end()) {
     return false;
   }
-  auto res = resource_map[res_name].first;
+  auto res = it->second.first;
 
   auto promise = std::make_shared<std::promise<rust::Vec<uint8_t>>>();
   res_data = promise->get_future();
