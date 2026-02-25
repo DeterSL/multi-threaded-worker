@@ -66,7 +66,6 @@ namespace detersl {
                 }
 
                 void commit_uncommitted() {
-                    std::cout << "Committing uncommitted data for Resource" << std::endl;
                     if (uncommitted_deleted_) {
                         committed_.clear();
                         committed_deleted_ = true;
@@ -79,7 +78,6 @@ namespace detersl {
                 }
 
                 void abort_uncommitted() {
-                    std::cout << "Aborting uncommitted data for Resource" << std::endl;
                     uncommitted_.reset();
                     uncommitted_deleted_ = false;
                 }

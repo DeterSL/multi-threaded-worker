@@ -235,6 +235,7 @@ static void schedule_function(detersl::func::WasmFuncInfo func_info,
   std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>& workflow_resources = invocation.workflow_resources;
   std::unordered_set<std::string>& workflow_rw_resources = invocation.workflow_rw_resources;
   const std::shared_ptr<std::atomic<bool>>& failed = invocation.failed;
+  const bool can_abort = invocation.request.can_abort;
 
   const size_t num_res = func_info.resources.size();
   const size_t num_ro_res = func_info.read_only_resources.size();
@@ -276,12 +277,25 @@ static void schedule_function(detersl::func::WasmFuncInfo func_info,
   cown_array<detersl::types::Resource> rw_cowns{read_write_resources, num_rw_res};
   cown_array<detersl::types::Resource> ro_cowns{read_only_resources, num_ro_res};
 
-  auto run = [func_info](auto rw_c, auto ro_c) -> bool {
+  auto run = [func_info, can_abort, workflow_rw_resources, failed](auto rw_c, auto ro_c){
     detersl::runner::WasmRunner runner(rw_c, ro_c, func_info);
+    
+    bool ok = runner.run();
 
-      // TODO: maybe a return code of function?
-      // Like previous version
-    return runner.run();
+    if(!can_abort){
+      // commit global resources directly since workflow cannot abort
+      for(std::string res_name: workflow_rw_resources){
+        detersl::types::Resource* res_ptr = runner.storage->get_resource(res_name);
+        if(res_ptr){
+          res_ptr->commit_uncommitted();
+        }
+      }
+      return;
+    }
+
+    if (!ok) {
+      failed->store(true, std::memory_order_release);      
+    }
   };
 
   if (guard) {
@@ -291,12 +305,7 @@ static void schedule_function(detersl::func::WasmFuncInfo func_info,
       if (!guard_c->decided || guard_c->selected != guard_edge || failed->load(std::memory_order_acquire)) {
         return;
       }
-      bool ok = run(rw_c, ro_c);
-      if (!ok) {
-        if (failed) {
-          failed->store(true, std::memory_order_release);
-        }
-      }
+      run(rw_c, ro_c);
     };
     return;
   }
@@ -305,12 +314,7 @@ static void schedule_function(detersl::func::WasmFuncInfo func_info,
     if(failed->load(std::memory_order_acquire)){
       return;
     }
-    bool ok = run(rw_c, ro_c);
-    if (!ok) {
-      if (failed) {
-        failed->store(true, std::memory_order_release);
-      }
-    }
+    run(rw_c, ro_c);
   };
 }
 
@@ -380,6 +384,7 @@ static bool schedule_choice_node(const Node* node,
   }
 
   std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>& workflow_resources = invocation.workflow_resources;
+  const std::shared_ptr<std::atomic<bool>>& failed = invocation.failed;
 
   std::vector<std::string> resource_names;  
   for (const auto& item : resolved) { 
@@ -406,7 +411,7 @@ static bool schedule_choice_node(const Node* node,
 
   cown_array<detersl::types::Resource> cowns{resource_cowns, resource_names.size()};
   
-  auto eval_choice = [node, resolved, value_inputs, resource_names](auto local_resources, auto &cown) {
+  auto eval_choice = [node, resolved, value_inputs, resource_names, failed](auto local_resources, auto &cown) {
     std::unordered_map<std::string, detersl::types::Resource*> resource_map;
 
     for (size_t i = 0; i < resource_names.size(); ++i) { 
@@ -427,18 +432,21 @@ static bool schedule_choice_node(const Node* node,
         if (!cmp(val, edge.Operand, edge.Value, &match)) {
           std::cerr << "choice: unsupported operand \"" << edge.Operand << "\"\n";
           cown->decided = true;
+          failed->store(true, std::memory_order_release);
           return;
         }
       }
       else {
         if (resource_map.find(resolved.at(edge.Variable)) == resource_map.end()) {
           std::cerr << "choice: resource \"" << resolved.at(edge.Variable) << "\" not found\n";
+          failed->store(true, std::memory_order_release);
           continue;
         }
         detersl::types::Resource* resource = resource_map.at(resolved.at(edge.Variable));
         if (!cmpBytes(resource->get_data(), edge.Operand, edge.Value, &match)) {
           std::cerr << "choice: unsupported operand \"" << edge.Operand << "\"\n";
           cown->decided = true;
+          failed->store(true, std::memory_order_release);
           return;
         }   
       }
@@ -461,8 +469,8 @@ static bool schedule_choice_node(const Node* node,
 
   if (guard) {
     const size_t guard_edge = guard->edge_index;
-    when(read(cowns), control, read(guard->control)) << [eval_choice, guard_edge](auto resources, auto control, auto parent) {
-      if (!parent->decided || parent->selected != guard_edge) {
+    when(read(cowns), control, read(guard->control)) << [eval_choice, guard_edge, failed](auto resources, auto control, auto parent) {
+      if (!parent->decided || parent->selected != guard_edge || failed->load(std::memory_order_acquire)) {
         control->decided = true;
         control->selected = static_cast<size_t>(-1);
         return;
@@ -472,7 +480,12 @@ static bool schedule_choice_node(const Node* node,
     return true;
   }
 
-  when(read(cowns), control) << [eval_choice](auto resources, auto control) {
+  when(read(cowns), control) << [eval_choice, failed](auto resources, auto control) {
+    if(failed->load(std::memory_order_acquire)){
+      control->decided = true;
+      control->selected = static_cast<size_t>(-1);
+      return;
+    }
     eval_choice(resources, control);
   };
   return true;
@@ -494,7 +507,7 @@ void schedule_commit_behaviour(detersl::types::WorkflowInvocation& invocation) {
   if (!commit_cowns.empty()) {
     cown_array<detersl::types::Resource> cowns{commit_cowns.data(), commit_cowns.size()};
     when(cowns) << [failed](auto resources) {
-      const bool is_failed = failed && failed->load(std::memory_order_acquire);
+      const bool is_failed = failed->load(std::memory_order_acquire);
       for (size_t i = 0; i < resources.length; ++i) {
         auto& res = *resources.array[i];
         if (is_failed) {
@@ -570,10 +583,12 @@ static bool schedule_graph(Node* node,
     }
   }
 
+  if(!invocation.request.can_abort){
+    return true;
+  }
+
   if (!ok) {
-    if (invocation.failed) {
-      invocation.failed->store(true, std::memory_order_release);
-    }
+    invocation.failed->store(true, std::memory_order_release); 
   }
 
   schedule_commit_behaviour(invocation);
@@ -660,6 +675,7 @@ bool invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err)
   request.WorkflowID = invoke.WorkflowID;
   request.Input = invoke.Input;
   request.RequestID = invoke.WorkflowID + ":" + std::to_string(next_workflow_request_id++);
+  request.can_abort = invoke.can_abort;
 
   detersl::types::WorkflowInvocation invocation{
     .workflow_resources = {},

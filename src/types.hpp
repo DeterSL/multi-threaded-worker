@@ -56,12 +56,14 @@ namespace detersl {
 
         struct InvokeDTO {
             std::string WorkflowID;                    // json:"workflow_id"
+            bool can_abort = true;                      // json:"can_abort"
             nlohmann::json Input;                         // json:"input"
         };
 
         struct WorkflowRequest {
             std::string WorkflowID;                   // json:"workflow_id"
             nlohmann::json Input;                         // json:"input"
+            bool can_abort;                             // json:"can_abort"
             std::string RequestID;                     // json:"request_id"
         };
 
@@ -142,12 +144,14 @@ namespace detersl {
         inline void to_json(json& j, const InvokeDTO& v) {
             j = json::object();
             j["workflow_id"] = v.WorkflowID;
+            j["can_abort"]   = v.can_abort;
             j["input"]       = v.Input;
         }
 
         inline void from_json(const json& j, InvokeDTO& v) {
             v.WorkflowID = j.at("workflow_id").get<std::string>();
             v.Input      = j.at("input").get<nlohmann::json>();
+            if(j.contains("can_abort")) v.can_abort = j.at("can_abort").get<bool>();
         }
 
         inline void to_json(json& j, const WorkflowRequest& v) {
@@ -155,12 +159,14 @@ namespace detersl {
             j["workflow_id"]   = v.WorkflowID;
             j["input"]      = v.Input;
             j["request_id"] = v.RequestID;
+            j["can_abort"]   = v.can_abort;
         }
 
         inline void from_json(const json& j, WorkflowRequest& v) {
             v.WorkflowID  = j.at("workflow_id").get<std::string>();
             v.Input     = j.at("input").get<nlohmann::json>();
             v.RequestID = j.at("request_id").get<std::string>();
+            if(j.contains("can_abort")) v.can_abort = j.at("can_abort").get<bool>();
         }
     }
 }
