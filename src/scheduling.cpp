@@ -102,12 +102,14 @@ static bool parse_resource_placeholder(const std::string& placeholder,
 }
 
 static bool resolve_choice_resources(const Node* node,
-                              const nlohmann::json& invocation_resources,
-                              const std::string &request_id,
+                              detersl::types::WorkflowInvocation& invocation,
                               std::unordered_map<std::string, std::string>& resolved,
                               std::unordered_map<std::string, json>& value_inputs,
-                              std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>& workflow_resources,
-                              std::string* err){
+                              std::string* err) {
+  const nlohmann::json& invocation_resources = invocation.request.Input;
+  const std::string &request_id = invocation.request.RequestID;
+  std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>& workflow_resources = invocation.workflow_resources;
+
   if (!node) {
     if (err) *err = "missing task node";
     return false;
@@ -165,17 +167,18 @@ static bool resolve_choice_resources(const Node* node,
 }
 
 static bool resolve_task_resources(const Node* node,
-                              const nlohmann::json& invocation_resources,
-                              const std::string &request_id,
+                              detersl::types::WorkflowInvocation& invocation,
                               std::unordered_map<std::string, std::string>& resolved,
                               std::unordered_set<std::string>& read_only,
                               std::unordered_map<std::string, nlohmann::json>& value_inputs,
-                              std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>& workflow_resources,
                               std::string* err) {
   if (!node) {
     if (err) *err = "missing task node";
     return false;
   }
+  nlohmann::json &invocation_resources = invocation.request.Input;
+  std::unordered_map<std::string, cown_ptr<detersl::types::Resource>> &workflow_resources = invocation.workflow_resources;
+  std::string &request_id = invocation.request.RequestID;
 
   for (const auto& entry : node->Resources) {
     bool immediate_val = false;
@@ -226,11 +229,13 @@ static bool resolve_task_resources(const Node* node,
 }
 
 static void schedule_function(detersl::func::WasmFuncInfo func_info,
-                                      std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>& workflow_resources,
-                                      std::unordered_set<std::string>& workflow_rw_resources,
-                                      const detersl::types::BranchGuard* guard,
-                                      const std::shared_ptr<std::atomic<bool>>& failed)
+                                      detersl::types::WorkflowInvocation& invocation,
+                                      const detersl::types::BranchGuard* guard)
 {
+  std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>& workflow_resources = invocation.workflow_resources;
+  std::unordered_set<std::string>& workflow_rw_resources = invocation.workflow_rw_resources;
+  const std::shared_ptr<std::atomic<bool>>& failed = invocation.failed;
+
   const size_t num_res = func_info.resources.size();
   const size_t num_ro_res = func_info.read_only_resources.size();
   const size_t num_rw_res = num_res - num_ro_res;
@@ -311,12 +316,8 @@ static void schedule_function(detersl::func::WasmFuncInfo func_info,
 
 
 static bool run_task_node(Node* node,
-                          const nlohmann::json& invocation_resources,
-                          const std::string &request_id,
-                          std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>& workflow_resources,
+                          detersl::types::WorkflowInvocation& invocation,
                           const detersl::types::BranchGuard* guard,
-                          const std::shared_ptr<std::atomic<bool>>& failed,
-                          std::unordered_set<std::string>& workflow_rw_resources,
                           std::string* err) {
   if (!node || !node->FuncID) {
     if (err) *err = "task missing func_id";
@@ -331,7 +332,7 @@ static bool run_task_node(Node* node,
   std::unordered_map<std::string, std::string> resolved;
   std::unordered_set<std::string> read_only;
   std::unordered_map<std::string, nlohmann::json> value_inputs;
-  if (!resolve_task_resources(node, invocation_resources, request_id, resolved, read_only, value_inputs, workflow_resources, err)) {
+  if (!resolve_task_resources(node, invocation, resolved, read_only, value_inputs, err)) {
     return false;
   }
 
@@ -361,14 +362,12 @@ static bool run_task_node(Node* node,
   }
   func_info.func_input_event.data = input_payload.dump();
 
-  schedule_function(func_info, workflow_resources, workflow_rw_resources, guard, failed);
+  schedule_function(func_info, invocation, guard);
   return true;
 }
 
 static bool schedule_choice_node(const Node* node,
-                                 const nlohmann::json& resources,
-                                 const std::string &request_id,
-                                 std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>& workflow_resources,
+                                 detersl::types::WorkflowInvocation& invocation,
                                  cown_ptr<detersl::types::ChoiceControl> control,
                                  const detersl::types::BranchGuard* guard,
                                  std::string* err)
@@ -376,10 +375,12 @@ static bool schedule_choice_node(const Node* node,
 
   std::unordered_map<std::string, std::string> resolved;
   std::unordered_map<std::string, json> value_inputs;
-  if (!resolve_choice_resources(node, resources, request_id, resolved, value_inputs, workflow_resources, err)) {
+  if (!resolve_choice_resources(node, invocation, resolved, value_inputs, err)) {
     return false;
   }
-  
+
+  std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>& workflow_resources = invocation.workflow_resources;
+
   std::vector<std::string> resource_names;  
   for (const auto& item : resolved) { 
     resource_names.push_back(item.second); 
@@ -477,29 +478,45 @@ static bool schedule_choice_node(const Node* node,
   return true;
 }
 
+void schedule_commit_behaviour(detersl::types::WorkflowInvocation& invocation) {
+  std::unordered_set<std::string>& workflow_rw_resources = invocation.workflow_rw_resources;
+  const std::shared_ptr<std::atomic<bool>>& failed = invocation.failed;
+
+  std::vector<cown_ptr<detersl::types::Resource>> commit_cowns;
+  commit_cowns.reserve(workflow_rw_resources.size());
+  for (const auto& res_name : workflow_rw_resources) {
+    auto it = resource_map.find(res_name);
+    if (it != resource_map.end()) {
+      commit_cowns.push_back(it->second.first);
+    }
+  }
+
+  if (!commit_cowns.empty()) {
+    cown_array<detersl::types::Resource> cowns{commit_cowns.data(), commit_cowns.size()};
+    when(cowns) << [failed](auto resources) {
+      const bool is_failed = failed && failed->load(std::memory_order_acquire);
+      for (size_t i = 0; i < resources.length; ++i) {
+        auto& res = *resources.array[i];
+        if (is_failed) {
+          res.abort_uncommitted();
+        } else {
+          res.commit_uncommitted();
+        }
+      }
+    };
+  } 
+}
+
 static bool schedule_graph(Node* node,
-                           const nlohmann::json& input,
-                           const std::string& request_id,
-                           std::string* err)
+                          detersl::types::WorkflowInvocation& invocation,
+                          std::string* err)
 {
-  std::unordered_map<std::string, cown_ptr<detersl::types::Resource>> workflow_resources;
-  std::unordered_set<std::string> workflow_rw_resources;
-  auto failed = std::make_shared<std::atomic<bool>>(false);
   if (!node) return true;
 
   struct QueueItem {
     Node* node;
     detersl::types::BranchGuard guard;
-
-    bool operator==(const QueueItem& other) const {
-      return node == other.node &&
-            guard.control == other.guard.control &&
-            guard.edge_index == other.guard.edge_index;
-    }
   };
-
-  auto hash_queue_item = [](const QueueItem& qi){return std::hash<const Node*>{}(qi.node);};
-  std::unordered_set<QueueItem, decltype(hash_queue_item)> visited(0, hash_queue_item);
 
   std::deque<QueueItem> queue;
   queue.push_back({node, detersl::types::BranchGuard{}});
@@ -518,13 +535,7 @@ static bool schedule_graph(Node* node,
     std::transform(type_lower.begin(), type_lower.end(), type_lower.begin(), ::tolower);
 
     if (type_lower == "task") {
-      if(visited.count(item) != 0) {
-        if(err) *err = "cannot schedule function " + std::to_string(*item.node->FuncID) + " twice.";
-        ok = false;
-        break;
-      }
-      visited.insert(item);
-      if (!run_task_node(item.node, input, request_id, workflow_resources, active_guard, failed, workflow_rw_resources, err)) {
+      if (!run_task_node(item.node, invocation, active_guard, err)) {
         ok = false;
         break;
       }
@@ -539,7 +550,7 @@ static bool schedule_graph(Node* node,
       queue.push_back({item.node->Next, item.guard});
     } else if (type_lower == "choice") {
       cown_ptr<detersl::types::ChoiceControl> control = make_cown<detersl::types::ChoiceControl>();
-      if(!schedule_choice_node(item.node, input, request_id, workflow_resources, control, active_guard, err)) {
+      if(!schedule_choice_node(item.node, invocation, control, active_guard, err)) {
         ok = false;
         break;
       }
@@ -560,36 +571,12 @@ static bool schedule_graph(Node* node,
   }
 
   if (!ok) {
-    if (failed) {
-      failed->store(true, std::memory_order_release);
+    if (invocation.failed) {
+      invocation.failed->store(true, std::memory_order_release);
     }
   }
 
-  std::vector<cown_ptr<detersl::types::Resource>> commit_cowns;
-  commit_cowns.reserve(workflow_rw_resources.size());
-  std::cout << "Workflow " << request_id << " accessed resources: ";
-  for (const auto& res_name : workflow_rw_resources) {
-    std::cout << res_name << " ";
-    if (resource_map.find(res_name) != resource_map.end()) {
-      commit_cowns.push_back(resource_map[res_name].first);
-    }
-  }
-  std::cout << std::endl;
-
-  if (!commit_cowns.empty()) {
-    cown_array<detersl::types::Resource> cowns{commit_cowns.data(), commit_cowns.size()};
-    when(cowns) << [failed](auto resources) {
-      const bool is_failed = failed && failed->load(std::memory_order_acquire);
-      for (size_t i = 0; i < resources.length; ++i) {
-        auto& res = *resources.array[i];
-        if (is_failed) {
-          res.abort_uncommitted();
-        } else {
-          res.commit_uncommitted();
-        }
-      }
-    };
-  } 
+  schedule_commit_behaviour(invocation);
 
   return ok;
 }
@@ -647,15 +634,15 @@ int register_workflow(const detersl::types::Workflow& workflow, std::string* err
   return 0;
 }
 
-bool schedule_workflow(const detersl::types::WorkflowRequest& request, std::string* err)
+bool schedule_workflow(detersl::types::WorkflowInvocation& invocation, std::string* err)
 {
-  auto it = workflow_registry.find(request.WorkflowID);
+  auto it = workflow_registry.find(invocation.request.WorkflowID);
   if (it == workflow_registry.end()) {
-    if (err) *err = "unknown workflow id: " + request.WorkflowID;
+    if (err) *err = "unknown workflow id: " + invocation.request.WorkflowID;
     return false;
   }
   Node* root = it->second;
-  return schedule_graph(root, request.Input, request.RequestID, err);
+  return schedule_graph(root, invocation, err);
 }
 
 bool invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err)
@@ -668,12 +655,19 @@ bool invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err)
       return false;
     }
   }
-
+  
   detersl::types::WorkflowRequest request;
   request.WorkflowID = invoke.WorkflowID;
   request.Input = invoke.Input;
   request.RequestID = invoke.WorkflowID + ":" + std::to_string(next_workflow_request_id++);
-  return schedule_workflow(request, err);
+
+  detersl::types::WorkflowInvocation invocation{
+    .workflow_resources = {},
+    .workflow_rw_resources = {},
+    .failed = std::make_shared<std::atomic<bool>>(false),
+    .request = std::move(request)
+  };
+  return schedule_workflow(invocation, err);
 }
 
 void cleanup_resources()
@@ -690,7 +684,7 @@ void cleanup_resources()
 
 bool get_resource(const std::string &res_name, std::future<rust::Vec<uint8_t>>& res_data) {
   auto it = resource_map.find(res_name);
-  
+
   if (it == resource_map.end()) {
     return false;
   }

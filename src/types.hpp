@@ -9,6 +9,8 @@
 #include <iostream>
 #include <cpp/when.h>
 #include <verona.h>
+#include "resource.hpp"
+#include <unordered_set>
 
 using namespace verona::rt;
 using namespace verona::cpp;
@@ -71,6 +73,13 @@ namespace detersl {
         struct BranchGuard {
             cown_ptr<ChoiceControl> control;
             size_t edge_index;
+        };
+
+        struct WorkflowInvocation {
+            std::unordered_map<std::string, cown_ptr<detersl::types::Resource>> workflow_resources;
+            std::unordered_set<std::string> workflow_rw_resources;
+            std::shared_ptr<std::atomic<bool>> failed = std::make_shared<std::atomic<bool>>(false);
+            WorkflowRequest request;
         };
 
         // ---------- nlohmann::json (de)serialization ----------
