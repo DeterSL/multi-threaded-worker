@@ -22,9 +22,6 @@ using json = nlohmann::json;
 namespace detersl::server {
     
 void register_and_schedule_json(){
-    const int delete_after_n_func = 3;
-    int func_count = 0;
-
     httplib::Server server;
     server.new_task_queue = [] { return new httplib::ThreadPool(1); };
 
@@ -45,11 +42,7 @@ void register_and_schedule_json(){
         }
 
         std::string error;
-        if (func_count >= delete_after_n_func) {
-            func_count = 0;
-            detersl::worker::cleanup_resources();
-        }
-
+   
         int func_id = 0;
         if (detersl::worker::register_wasm_function(j, &error, &func_id) != 0) {
             res.status = 400;
@@ -57,7 +50,6 @@ void register_and_schedule_json(){
             return;
         }
 
-        func_count++;
         res.status = 201;
         res.set_content("Registered func_id: " + std::to_string(func_id) + "\n", "text/plain");
     });
@@ -99,6 +91,9 @@ void register_and_schedule_json(){
     });
 
     server.Post("/workflow/invoke", [&](const httplib::Request& req, httplib::Response& res) {
+        const int delete_after_n_wf = 3;
+        int wf_count = 0;
+
         if (req.body.empty()) {
             res.status = 400;
             res.set_content("Missing JSON body.\n", "text/plain");
@@ -124,11 +119,18 @@ void register_and_schedule_json(){
             return;
         }
 
+         if (wf_count >= delete_after_n_wf) {
+            wf_count = 0;
+            detersl::worker::cleanup_resources();
+        }
+
         if (!detersl::worker::invoke_workflow(invoke, &error)) {
             res.status = 400;
             res.set_content(std::string("Failed to invoke workflow: ") + error + "\n", "text/plain");
             return;
         }
+        
+        wf_count++;
 
         res.status = 202;
         res.set_content("Workflow scheduled.\n", "text/plain");

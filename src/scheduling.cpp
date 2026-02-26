@@ -54,6 +54,8 @@ static void schedule_function(detersl::func::WasmFuncInfo func_info,
   size_t ro_index = 0;
   size_t rw_index = 0;
 
+  std::unordered_map<std::string, int> local_ref_counts;
+
   for(auto & res_name : func_info.resources){
     if(workflow_resources.find(res_name) != workflow_resources.end()){
       // Resource is a workflow-scoped resource
@@ -65,7 +67,6 @@ static void schedule_function(detersl::func::WasmFuncInfo func_info,
       }
       continue;
     }
-
 
     if (resource_map.find(res_name) == resource_map.end())
     {
@@ -79,23 +80,31 @@ static void schedule_function(detersl::func::WasmFuncInfo func_info,
       read_write_resources[rw_index++] = resource_map[res_name].first;
       workflow_rw_resources.insert(res_name);
     }
-    resource_map[res_name].second++; // increment ref count
+    local_ref_counts[res_name] = ++resource_map[res_name].second; // increment ref count
   }
 
   cown_array<detersl::types::Resource> rw_cowns{read_write_resources, num_rw_res};
   cown_array<detersl::types::Resource> ro_cowns{read_only_resources, num_ro_res};
 
-  auto run = [func_info, can_abort, workflow_rw_resources, failed](auto rw_c, auto ro_c){
+  auto run = [func_info, can_abort, workflow_rw_resources, failed, local_ref_counts](auto rw_c, auto ro_c){
     detersl::runner::WasmRunner runner(rw_c, ro_c, func_info);
     
     bool ok = runner.run();
 
     if(!can_abort){
       // commit global resources directly since workflow cannot abort
-      for(std::string res_name: workflow_rw_resources){
-        detersl::types::Resource* res_ptr = runner.storage->get_resource(res_name);
+      for(auto& res: local_ref_counts){
+        if(workflow_rw_resources.find(res.first) == workflow_rw_resources.end()){
+          //is read only
+          continue;
+        }
+        detersl::types::Resource* res_ptr = runner.storage->get_resource(res.first);
         if(res_ptr){
           res_ptr->commit_uncommitted();
+          if(res_ptr->is_deleted()){
+            // push to deleted resource queue for cleanup
+            deleted_resources_queue.push({res.first, res.second});
+          }
         }
       }
       return;
@@ -303,18 +312,23 @@ void schedule_commit_behaviour(detersl::types::WorkflowInvocation& invocation) {
   std::unordered_set<std::string>& workflow_rw_resources = invocation.workflow_rw_resources;
   const std::shared_ptr<std::atomic<bool>>& failed = invocation.failed;
 
+  std::unordered_map<std::string, int> local_ref_counts;
+  std::vector<std::string> commit_resource_names;
+
   std::vector<cown_ptr<detersl::types::Resource>> commit_cowns;
   commit_cowns.reserve(workflow_rw_resources.size());
   for (const auto& res_name : workflow_rw_resources) {
     auto it = resource_map.find(res_name);
     if (it != resource_map.end()) {
       commit_cowns.push_back(it->second.first);
+      local_ref_counts[res_name] = ++it->second.second; // get ref count and increment
+      commit_resource_names.push_back(res_name);
     }
   }
 
   if (!commit_cowns.empty()) {
     cown_array<detersl::types::Resource> cowns{commit_cowns.data(), commit_cowns.size()};
-    when(cowns) << [failed](auto resources) {
+    when(cowns) << [failed, &local_ref_counts, &commit_resource_names](auto resources) {
       const bool is_failed = failed->load(std::memory_order_acquire);
       for (size_t i = 0; i < resources.length; ++i) {
         auto& res = *resources.array[i];
@@ -322,6 +336,9 @@ void schedule_commit_behaviour(detersl::types::WorkflowInvocation& invocation) {
           res.abort_uncommitted();
         } else {
           res.commit_uncommitted();
+          if(res.is_deleted()){
+            deleted_resources_queue.push({commit_resource_names[i], local_ref_counts[commit_resource_names[i]]});
+          }
         }
       }
     };
@@ -478,13 +495,16 @@ bool invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err)
       return false;
     }
   }
-  
-  detersl::types::WorkflowRequest request;
-  request.WorkflowID = invoke.WorkflowID;
-  request.Input = invoke.Input;
-  request.RequestID = invoke.WorkflowID + ":" + std::to_string(next_workflow_request_id++);
-  request.can_abort = invoke.can_abort;
 
+  std::string invocation_id = invoke.WorkflowID + ":" + std::to_string(next_workflow_request_id++);
+  
+  detersl::types::WorkflowRequest request{
+    .WorkflowID = invoke.WorkflowID,
+    .Input = invoke.Input,
+    .RequestID = invocation_id,
+    .can_abort = invoke.can_abort
+  };
+  
   detersl::types::WorkflowInvocation invocation{
     .workflow_resources = {},
     .workflow_rw_resources = {},
