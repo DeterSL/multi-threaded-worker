@@ -9,7 +9,6 @@
 #include <deque>
 #include <vector>
 #include <fstream>
-#include "basic-net.hpp"
 #include "cpp-func.hpp"
 #include "cpp-runner.hpp"
 #include "cpp/cown.h"
