@@ -9,8 +9,6 @@
 #include <deque>
 #include <vector>
 #include <fstream>
-#include "cpp-func.hpp"
-#include "cpp-runner.hpp"
 #include "cpp/cown.h"
 #include "resource.hpp"
 #include "types.hpp"
@@ -26,7 +24,6 @@ using json = nlohmann::json;
 
 namespace detersl::worker {
 
-std::unordered_map<std::string, detersl::types::FunctionType> all_functions;
 std::unordered_map<std::string, std::pair<cown_ptr<detersl::types::Resource>, uint64_t>> resource_map;
 BasicMPSCQueue<std::pair<std::string, uint64_t>> deleted_resources_queue;
 std::unordered_map<int, detersl::func::WasmFuncInfo> wasm_func_registry;

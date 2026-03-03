@@ -26,17 +26,11 @@ namespace detersl::runner {
                 local_resources[res_name] = &(*rw_cown_arr.array[rw_index++]);
             }
         }
-
-        if (cur_runner != nullptr) {
-            // This means that we are changing the current runner ptr
-            // without destroying the previous one
-            assert(false);
-        }
-            
+        
         storage = std::make_unique<detersl::kv::ResourceStorage>(std::move(local_resources),  
             func_info_.read_only_resources);
         std::cout << "Runner created in thread: " << std::this_thread::get_id() << "\n";
-        cur_runner = this;
+       
     }
 
     std::vector<std::string> Runner::get_deleted_resources() {
@@ -49,7 +43,5 @@ namespace detersl::runner {
         return deleted_resources;
     }
 
-    Runner::~Runner() {
-        cur_runner = nullptr;
-    }  
+    Runner::~Runner() = default;
 }

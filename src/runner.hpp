@@ -31,7 +31,5 @@ namespace detersl {
             protected:
                 detersl::func::BasicFuncInfo func_info_;
         };
-
-    inline thread_local Runner* cur_runner = nullptr;
     }
 }

@@ -3,8 +3,6 @@
 
 #include <dlfcn.h>
 #include <fstream>
-#include "cpp-func.hpp"
-#include "cpp-runner.hpp"
 #include "cpp/cown.h"
 #include "resource.hpp"
 #include "types.hpp"
