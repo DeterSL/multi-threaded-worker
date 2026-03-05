@@ -1,0 +1,4 @@
+{
+"workflow_id": "choice_workflow",
+"input": { "crop_size": "10", "image_id": "img-5678", "image_data": "123456789123456789123456789" }
+}

@@ -1,0 +1,44 @@
+{
+    "id" : "choice_workflow",
+    "tasks": [
+        { 
+            "type": "Task", 
+            "func_id": 3, 
+            "resources": { "check": "&_check:w" }
+        },
+        {
+            "type": "Choice",
+            "choices": [
+                {
+                    "variable": "&_check",
+                    "string_eq": "checkistrue",
+                    "tasks": [
+                        {
+                            "type": "Task",
+                            "func_id": 1,
+                            "resources": {
+                                "image_id": "&image_id:w",
+                                "output_image": "&_compress_out:w",
+                                "image_data": "$image_data"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "variable": "&_check",
+                    "string_eq": "checkisfalse",
+                    "tasks": [
+                        {
+                            "type": "Task",
+                            "func_id": 2,
+                            "resources": {
+                                "image_id": "&_compress_out:r",
+                                "output_image": "&_crop_out:r",
+                                "crop_size": "$crop_size"}
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

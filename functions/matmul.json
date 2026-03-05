@@ -1,14 +1,14 @@
 {
   "func_name": "matmul",
   "func_invocation_id": "00000000-0000-0000-0000-000000000001",
-  "func_binary_hash": "a4d8948e72dc764235444f9a33a9796c1",
+  "func_binary_hash": "45b79c3de153d407af682b4939be162",
   "func_binary_source": {
     "type": "fs",
-    "path": "/home/sod/research/serverless/source-code/detersl_runtime_example/matmul/matmul.wasm"
+    "path": "/Users/alex/Desktop/DeterSL/applications/matmul/matmul.wasm"
   },
   "func_input_event": {
     "type": "data",
-    "data": "{ \"name\": \"idk\", \"age\": 150, \"work\": \"N/A\", \"n\": 6 }"
+    "data": "{}"
   },
   "func_output_event": {
     "type": "default"

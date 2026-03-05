@@ -2,22 +2,34 @@
 #include <string>
 #include <thread>
 #include <nlohmann/json.hpp>
-#include "detersl.h"
-#include "shared_objects.h"
+#include "../native-execution/detersl.h"
+#include <vector>
 
 using namespace detersl;
 
-extern "C" int func(std::string input)
+extern "C" bool func(nlohmann::json input)
 {
-  set_resource("res1", std::to_string(8));
-  set_resource("res2", std::string("Hello World!"));
+  try{
+    nlohmann::json data = input["data"];
+    nlohmann::json resources = data["resources"];
+    nlohmann::json values = data["values"];
 
-  // std::cout << "res1 is " << get_resource<int>("res1") << " and res2 is " <<
-  // get_resource<std::string>("res2") << std::endl;
+    std::string image_data = values.at("image_data").get<std::string>();
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+    std::vector<uint8_t> res1_v {image_data.begin(),image_data.end()};
+    
+    set_resource(resources.at("res1").get<std::string>(), res1_v);
 
-  std::cout << "slept for 5 seconds" <<std::endl;
+    std::vector<uint8_t> get_res1 = get_resource(resources.at("res1").get<std::string>());
 
-  return 0;
+    std::string get_res1_s(get_res1.begin(), get_res1.end());
+
+    std::cout << "res1 is " << get_res1_s << std::endl;
+  }
+  catch(...){
+    std::cout << "error in function print input" << std::endl;
+    return false;
+  }
+ 
+  return true;
 }
