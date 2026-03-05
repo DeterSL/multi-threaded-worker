@@ -108,39 +108,3 @@ if (UNIX AND NOT APPLE)
   target_link_options(detersl-worker PRIVATE -Wl,--no-as-needed)
 endif()
 
-# add_executable(detersl-worker 
-#     src/main.cpp
-#     src/runner.cpp
-#     src/scheduling.cpp
-# )
-
-# target_link_libraries(detersl-worker PRIVATE
-#     detersl_common
-#     nlohmann_json::nlohmann_json
-# )
-
-# ------------------------------------------------------------
-# Shared plugin
-# ------------------------------------------------------------
-# Get all cpp files under functions/
-# file(GLOB FUNCTION_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/functions/*.cpp")
-
-# foreach(FN ${FUNCTION_SOURCES})
-#     get_filename_component(BASENAME ${FN} NAME_WE)
-
-#     add_library(${BASENAME} SHARED ${FN})
-
-#     target_link_libraries(${BASENAME} PRIVATE
-#         detersl_common
-#         nlohmann_json::nlohmann_json
-#     )
-    
-#     target_include_directories(${BASENAME} PUBLIC
-#         ${CMAKE_CURRENT_SOURCE_DIR}/src
-#     )
-
-#     set_target_properties(${BASENAME} PROPERTIES
-#         PREFIX ""                         # removes 'lib'
-#         POSITION_INDEPENDENT_CODE ON
-#     )
-# endforeach()

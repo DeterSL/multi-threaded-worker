@@ -1,5 +1,0 @@
-{
-    "id": "f1",
-    "func_name": "print_input",
-    "resources": ["res1", "res2"]
-}
