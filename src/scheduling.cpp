@@ -26,8 +26,7 @@ namespace detersl::worker {
 
 std::unordered_map<std::string, std::pair<cown_ptr<detersl::types::Resource>, uint64_t>> resource_map;
 BasicMPSCQueue<std::pair<std::string, uint64_t>> deleted_resources_queue;
-std::unordered_map<int, detersl::func::WasmFuncInfo> wasm_func_registry;
-int next_wasm_func_id = 1;
+std::unordered_map<std::string, detersl::func::WasmFuncInfo> wasm_func_registry;
 std::unordered_map<std::string, Node*> workflow_registry;
 int next_workflow_request_id = 1;
 
@@ -136,13 +135,13 @@ static bool run_task_node(Node* node,
                           detersl::types::WorkflowInvocation& invocation,
                           const detersl::types::BranchGuard* guard,
                           std::string* err) {
-  if (!node || !node->FuncID) {
-    if (err) *err = "task missing func_id";
+  if (!node) {
+    if (err) *err = "task missing function";
     return false;
   }
-  auto it = wasm_func_registry.find(*node->FuncID);
+  auto it = wasm_func_registry.find(node->FuncID);
   if (it == wasm_func_registry.end()) {
-    if (err) *err = "unknown func_id " + std::to_string(*node->FuncID);
+    if (err) *err = "unknown functions " + node->FuncID;
     return false;
   }
 
@@ -417,7 +416,7 @@ static bool schedule_graph(Node* node,
   return ok;
 }
 
-int register_wasm_function(const nlohmann::json& j, std::string* err, int* func_id)
+int register_wasm_function(const nlohmann::json& j, std::string* err)
 {
 
   static rust::Box<FfiExecutioner> compile_exec = new_executioner(*engine, new_cpp_kv(new KVInterface()));
@@ -439,9 +438,7 @@ int register_wasm_function(const nlohmann::json& j, std::string* err, int* func_
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     std::cout << "Function " << info.func_name << " compiled in " << duration << " ms\n";
     
-    const int id = next_wasm_func_id++;
-    wasm_func_registry[id] = std::move(info);
-    if (func_id) *func_id = id;
+    wasm_func_registry[info.func_name] = std::move(info);
 
     return 0;
   } catch (const rust::Error& e) {

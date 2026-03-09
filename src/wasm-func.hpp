@@ -46,10 +46,9 @@ struct FuncInputEvent {
     std::string data;
 
     static FuncInputEvent from_json(const nlohmann::json& j) {
-        require_object(j, "func_input_event");
-        FuncInputEvent e;
-        e.type = require_field<std::string>(j, "type");
-        e.data = require_field<std::string>(j, "data");
+        FuncInputEvent e;  
+        e.type = j.value("type", "data");
+        if (j.contains("data"))  e.data = j.at("data").get<std::string>();
         return e;
     }
 
@@ -65,9 +64,8 @@ struct FuncOutputEvent {
     std::string type;
 
     static FuncOutputEvent from_json(const nlohmann::json& j) {
-        require_object(j, "func_output_event");
         FuncOutputEvent e;
-        e.type = require_field<std::string>(j, "type");
+        e.type = j.value("type", "default");
         return e;
     }
 
@@ -87,7 +85,6 @@ struct FuncLinkOpt {
     bool link_socket = true;
 
     static FuncLinkOpt from_json(const nlohmann::json& j) {
-        require_object(j, "func_link_opt");
         FuncLinkOpt o;
         o.link_clocks     = j.value("link_clocks", true);
         o.link_filesystem = j.value("link_filesystem", true);
@@ -118,7 +115,6 @@ struct FuncExecutionPolicy {
     bool allow_socket = false;
 
     static FuncExecutionPolicy from_json(const nlohmann::json& j) {
-        require_object(j, "func_execution_policy");
         FuncExecutionPolicy p;
         p.allow_clocks     = j.value("allow_clocks", true);
         p.allow_filesystem = j.value("allow_filesystem", false);
@@ -144,7 +140,6 @@ struct FuncInitialValues {
     int random_seed = 42;
 
     static FuncInitialValues from_json(const nlohmann::json& j) {
-        require_object(j, "func_initial_values");
         FuncInitialValues v;
         v.init_clock  = j.value("init_clock", 0);
         v.random_seed = j.value("random_seed", 42);

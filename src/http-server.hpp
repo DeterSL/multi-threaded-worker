@@ -41,15 +41,14 @@ void register_and_schedule_json(){
 
         std::string error;
    
-        int func_id = 0;
-        if (detersl::worker::register_wasm_function(j, &error, &func_id) != 0) {
+        if (detersl::worker::register_wasm_function(j, &error) != 0) {
             res.status = 400;
             res.set_content(std::string("Failed to register WASM function: ") + error + "\n", "text/plain");
             return;
         }
 
         res.status = 201;
-        res.set_content("Registered func_id: " + std::to_string(func_id) + "\n", "text/plain");
+        res.set_content("Registered function\n", "text/plain");
     });
 
     server.Post("/workflow/register", [&](const httplib::Request& req, httplib::Response& res) {

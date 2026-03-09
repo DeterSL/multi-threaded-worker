@@ -23,7 +23,7 @@ namespace detersl {
 
         struct State {
             std::string Type;                          // json:"type"
-            std::optional<int> FuncID;                 // json:"func_id,omitempty"
+            std::string FuncID;                 // json:"func_id,omitempty"
             std::map<std::string, std::string> Resources; // json:"resources,omitempty"
             std::vector<Choice> Choices;               // json:"choices,omitempty"
             std::string Default;                       // json:"default,omitempty"
@@ -112,7 +112,7 @@ namespace detersl {
         inline void to_json(json& j, const State& v) {
             j = json::object();
             j["type"] = v.Type;
-            if (v.FuncID)                j["func_id"] = *v.FuncID;
+            if (!v.FuncID.empty())       j["func_id"] = v.FuncID;
             if (!v.Resources.empty())    j["resources"] = v.Resources;
             if (!v.Choices.empty())      j["choices"] = v.Choices;
             if (!v.Default.empty())      j["default"] = v.Default;
@@ -120,7 +120,7 @@ namespace detersl {
 
         inline void from_json(const json& j, State& v) {
             v.Type = j.at("type").get<std::string>();
-            if (j.contains("func_id"))       v.FuncID = j.at("func_id").get<int>();
+            if (j.contains("func_id"))       v.FuncID = j.at("func_id").get<std::string>();
             if (j.contains("resources"))     v.Resources = j.at("resources").get<std::map<std::string, std::string>>();
             if (j.contains("choices"))       v.Choices = j.at("choices").get<std::vector<Choice>>();
             if (j.contains("default"))       v.Default = j.at("default").get<std::string>();

@@ -27,7 +27,7 @@ namespace detersl::worker {
         std::string WorkflowID;
         std::string StateID;
         std::string Type;
-        std::optional<int> FuncID;
+        std::string FuncID;
         std::map<std::string, std::string> Resources;
         bool End{false};
         Node* Next{nullptr};
