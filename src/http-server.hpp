@@ -107,6 +107,7 @@ void register_and_schedule_json(){
         }
 
         std::string error;
+        std::string request_id;
         detersl::types::InvokeDTO invoke;
         try {
             invoke = j.get<detersl::types::InvokeDTO>();
@@ -121,7 +122,7 @@ void register_and_schedule_json(){
             detersl::worker::cleanup_resources();
         }
 
-        if (!detersl::worker::invoke_workflow(invoke, &error)) {
+        if (!detersl::worker::invoke_workflow(invoke, &error, &request_id)) {
             res.status = 400;
             res.set_content(std::string("Failed to invoke workflow: ") + error + "\n", "text/plain");
             return;
@@ -129,8 +130,32 @@ void register_and_schedule_json(){
         
         wf_count++;
 
+        json body = {
+            {"status", "scheduled"},
+            {"request_id", request_id},
+        };
         res.status = 202;
-        res.set_content("Workflow scheduled.\n", "text/plain");
+        res.set_content(body.dump(), "application/json");
+    });
+
+    server.Get("/workflow/status/:request_id", [&](const httplib::Request& req, httplib::Response& res) {
+        const std::string request_id = req.path_params.at("request_id");
+        detersl::types::WorkflowStatus status;
+        if (!detersl::worker::get_workflow_status(request_id, &status)) {
+            res.status = 404;
+            res.set_content("Workflow invocation not found.\n", "text/plain");
+            return;
+        }
+
+        json body = {
+            {"request_id", request_id},
+            {"done", status.done},
+            {"failed", status.failed},
+            {"latency_ms", status.latency_ms},
+            {"completed_at", status.completed_at_ms},
+        };
+        res.status = 200;
+        res.set_content(body.dump(), "application/json");
     });
 
     server.Get("/resource/:res_name", [&](const httplib::Request& req, httplib::Response& res) {
@@ -158,6 +183,11 @@ void register_and_schedule_json(){
         }
         res.status = 200;
         res.set_content(reinterpret_cast<const char*>(data.data()), data.size(), "application/octet-stream");
+    });
+
+    server.Get("/health", [&](const httplib::Request& req, httplib::Response& res) {
+        res.status = 200;
+        res.set_content("healthy\n", "text/plain");
     });
 
     std::cout << "Listening for WASM configs on http://0.0.0.0:6666\n";

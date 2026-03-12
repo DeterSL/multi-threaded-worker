@@ -46,14 +46,8 @@ namespace detersl {
 
                 bool run() override{
                     bool ok = true;
-                    try{
-                        std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
-                    
+                    try{                    
                         worker_excutioner->execution_func(func_info_);
-
-                        std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
-                        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-                        std::cout << "Function " << func_info_.func_name << " executed in " << duration << " ms\n";
                     } catch (const std::exception& e) {
                         std::cerr << "Exception during WasmRunner run: " << e.what() << std::endl;
                         ok = false;

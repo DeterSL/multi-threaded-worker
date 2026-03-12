@@ -28,9 +28,7 @@ namespace detersl::runner {
         }
         
         storage = std::make_unique<detersl::kv::ResourceStorage>(std::move(local_resources),  
-            func_info_.read_only_resources);
-        std::cout << "Runner created in thread: " << std::this_thread::get_id() << "\n";
-       
+            func_info_.read_only_resources);       
     }
 
     std::vector<std::string> Runner::get_deleted_resources() {

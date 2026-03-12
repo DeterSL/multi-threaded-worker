@@ -11,6 +11,7 @@
 #include <verona.h>
 #include "resource.hpp"
 #include <unordered_set>
+#include "metrics.hpp"
 
 using namespace verona::rt;
 using namespace verona::cpp;
@@ -76,8 +77,17 @@ namespace detersl {
         struct WorkflowInvocation {
             std::unordered_map<std::string, cown_ptr<detersl::types::Resource>> workflow_resources;
             std::unordered_set<std::string> workflow_rw_resources;
+            cown_ptr<detersl::types::Resource> invocation_cown;
             std::shared_ptr<std::atomic<bool>> failed = std::make_shared<std::atomic<bool>>(false);
+            std::shared_ptr<detersl::metrics::InvocationMetrics> metrics;
             WorkflowRequest request;
+        };
+
+        struct WorkflowStatus {
+            bool done = false;
+            bool failed = false;
+            int64_t latency_ms = -1;
+            int64_t completed_at_ms = -1;
         };
 
         // ---------- nlohmann::json (de)serialization ----------
