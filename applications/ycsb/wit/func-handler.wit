@@ -1,0 +1,15 @@
+package detersl:api@0.1.0; 
+
+interface func-handler {
+    record event {
+        data: string,
+    }
+
+    record output {
+        data: string
+    }
+    
+    handle: func(event: event) -> output;
+}
+
+

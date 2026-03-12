@@ -1,0 +1,6 @@
+package detersl:api@0.1.0; 
+
+world detersl-api {
+    import kv;
+    export func-handler; 
+}
