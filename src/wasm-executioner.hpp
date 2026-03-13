@@ -22,10 +22,6 @@ namespace detersl {
                     const std::string config = func.to_json().dump();
                     
                     auto out = exec_->executioner_run_json(config);
-                    std::cout << "the output of function " << func.func_name << " is :" <<  std::string(out.begin(), out.end()) << std::endl;
-
-                    // TODO: the function out can be anything
-                    //func.set_output(out);
                 }
 
                 detersl::kv::WasmExecEnvKV* get_kv() {
