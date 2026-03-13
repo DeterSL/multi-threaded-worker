@@ -15,8 +15,6 @@ namespace detersl {
                 Runner(acquired_cown_span<detersl::types::Resource> rw_cown_arr,
                     acquired_cown_span<const detersl::types::Resource> ro_cown_arr, detersl::func::BasicFuncInfo basic_func);
 
-                std::vector<std::string> get_deleted_resources();
-
                 virtual bool run() = 0;
 
                 ~Runner();

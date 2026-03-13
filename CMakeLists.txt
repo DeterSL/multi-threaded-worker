@@ -77,6 +77,7 @@ add_library(detersl_worker_core STATIC
     src/scheduling.cpp
     src/graph.cpp
     src/metrics.cpp
+    src/utils.cpp
 )
 
 target_link_libraries(detersl_worker_core PUBLIC

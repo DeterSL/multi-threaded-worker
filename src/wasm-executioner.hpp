@@ -18,7 +18,7 @@ namespace detersl {
                 }
 
 
-                void execution_func(detersl::func::WasmFuncInfo func) {
+                void execution_func(detersl::func::WasmFuncInfo&& func) {
                     const std::string config = func.to_json().dump();
                     
                     auto out = exec_->executioner_run_json(config);

@@ -88,7 +88,7 @@ void register_and_schedule_json(){
     });
 
     server.Post("/workflow/invoke", [&](const httplib::Request& req, httplib::Response& res) {
-        const int delete_after_n_wf = 3;
+        const int delete_after_n_wf = 100;
         int wf_count = 0;
 
         if (req.body.empty()) {

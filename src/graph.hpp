@@ -9,12 +9,27 @@
 #include <cmath>
 #include <iostream>
 #include <unordered_set>
+#include "wasm-func.hpp"
 
 using json = nlohmann::json;
 
 namespace detersl::worker {
 
     struct Node;
+
+    enum class NodeType : uint8_t {
+        Task,
+        Choice,
+        Unknown
+    };
+
+    struct ResourceBinding {
+        std::string local_name;
+        std::string key;
+        bool immediate = false;
+        bool read_only = false;
+        bool is_local = false;
+    };
 
     struct ChoiceEdge {
         std::string Variable;
@@ -26,9 +41,9 @@ namespace detersl::worker {
     struct Node {
         std::string WorkflowID;
         std::string StateID;
-        std::string Type;
+        NodeType Type;
         std::string FuncID;
-        std::map<std::string, std::string> Resources;
+        std::vector<ResourceBinding> resource_bindings;
         bool End{false};
         Node* Next{nullptr};
         std::vector<ChoiceEdge> Choices;

@@ -1,5 +1,5 @@
 #pragma once
-#include <map>
+#include <unordered_map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -25,7 +25,7 @@ namespace detersl {
         struct State {
             std::string Type;                          // json:"type"
             std::string FuncID;                 // json:"func_id,omitempty"
-            std::map<std::string, std::string> Resources; // json:"resources,omitempty"
+            std::unordered_map<std::string, std::string> Resources; // json:"resources,omitempty"
             std::vector<Choice> Choices;               // json:"choices,omitempty"
             std::string Default;                       // json:"default,omitempty"
             // Match Go semantics: return the same underlying container (no copy)
@@ -131,7 +131,7 @@ namespace detersl {
         inline void from_json(const json& j, State& v) {
             v.Type = j.at("type").get<std::string>();
             if (j.contains("func_id"))       v.FuncID = j.at("func_id").get<std::string>();
-            if (j.contains("resources"))     v.Resources = j.at("resources").get<std::map<std::string, std::string>>();
+            if (j.contains("resources"))     v.Resources = j.at("resources").get<std::unordered_map<std::string, std::string>>();
             if (j.contains("choices"))       v.Choices = j.at("choices").get<std::vector<Choice>>();
             if (j.contains("default"))       v.Default = j.at("default").get<std::string>();
         }

@@ -20,6 +20,7 @@ from zipfian_generator import ZipfGenerator
 from timeit import default_timer as timer
 import pandas as pd
 import calculate_metrics
+from tqdm import tqdm
 
 threads = int(sys.argv[1])
 N_ENTITIES = int(sys.argv[2])
@@ -35,6 +36,7 @@ DEFAULT_TIMEOUT : int = 10
 SAVE_DIR: str = sys.argv[6]
 warmup_seconds: int = int(sys.argv[7])
 run_with_validation = sys.argv[8].lower() == "true"
+poll_sleep = 0.001
 
 @dataclass
 class HttpResult:
@@ -146,8 +148,7 @@ def register_function(func_name : str):
     print(reg_func)
 
 def wait_for_wf(invocation_id : str):
-    completed = False
-    while completed is not True:
+    while True:
         res = http_call_json(
             base_url= DETERSL_HOST,
             path=f"/workflow/status/{invocation_id}",
@@ -155,10 +156,9 @@ def wait_for_wf(invocation_id : str):
             timeout_s= DEFAULT_TIMEOUT,
             )
         body = res.json_data
-        completed = body["done"]
-        time.sleep(sleep_time)
-    
-    return body
+        if body["done"]:
+            return body
+        time.sleep(poll_sleep)
 
 def invoke_workflow(payload):
     resp_body = http_call_json(
@@ -202,7 +202,7 @@ def ycsb_init(keys: list[int]):
         ]
     })
 
-    for key in keys:
+    for key in tqdm(keys):
         payload = {
             "workflow_id" : "yscb_write",
             "input" : {
@@ -224,13 +224,7 @@ def transactional_ycsb_generator(keys,
         key2 = keys[next(zipf_gen)]
         while key2 == key:
             key2 = keys[next(zipf_gen)]
-        yield {
-            "workflow_id" : "yscb_transfer",
-            "input" : {
-                "from" : str(key),
-                "to" : str(key2)
-            }
-        }
+        yield "yscb_transfer", str(key), str(key2)
 
 def benchmark_runner() -> dict[bytes, dict]:
     print("Benchmark starting")
@@ -244,9 +238,12 @@ def benchmark_runner() -> dict[bytes, dict]:
         for i in range(messages_per_second):
             if i % step == 0:
                 time.sleep(sleep_time)
-            payload = next(ycsb_generator)
-            future = invoke_workflow(payload)
-            timestamp_futures[future["request_id"]] = {"op": f"{payload["workflow_id"]} {payload["input"]["from"]}->{payload["input"]["to"]}"}
+            wf_id, key1, key2 = next(ycsb_generator)
+            future = invoke_workflow({
+                "workflow_id" : wf_id,
+                "input" : {"from" : key1, "to" : key2}
+                })
+            timestamp_futures[future["request_id"]] = {"op": f"{wf_id} {key1}->{key2}"}
         sec_end = timer()
         lps = sec_end - sec_start
         if lps < 1:
@@ -256,7 +253,7 @@ def benchmark_runner() -> dict[bytes, dict]:
     end = timer()
     print(f"Average latency per second: {(end - start) / seconds}")
 
-    for key in timestamp_futures.keys():
+    for key in tqdm(timestamp_futures.keys()):
         resp = wait_for_wf(key)
         timestamp_futures[key]["latency_ms"] = resp["latency_ms"]
         timestamp_futures[key]["completed_at_ms"] = resp["completed_at"]

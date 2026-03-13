@@ -31,15 +31,5 @@ namespace detersl::runner {
             func_info_.read_only_resources);       
     }
 
-    std::vector<std::string> Runner::get_deleted_resources() {
-        std::vector<std::string> deleted_resources;
-        for(auto& res : func_info_.resources) {
-            if (storage->get_resource(res) == nullptr) {
-                deleted_resources.push_back(res);
-            }
-        }
-        return deleted_resources;
-    }
-
     Runner::~Runner() = default;
 }

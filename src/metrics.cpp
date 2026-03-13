@@ -34,7 +34,6 @@ std::shared_ptr<InvocationMetrics> get_invocation_metrics(const std::string& req
 void insert_invocation_metric(const std::string& request_id, const std::shared_ptr<InvocationMetrics> metric){
     std::lock_guard<std::mutex> lock(metrics_mutex);
     invocation_metrics_index[request_id] = metric;
-
 }
 
 void prune_completed_invocation_metrics() {
