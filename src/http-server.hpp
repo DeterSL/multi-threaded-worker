@@ -7,7 +7,6 @@
 #include "resource.hpp"
 #include "types.hpp"
 #include "wasm-runner.hpp"
-#include "thread-safe-queue.hpp"
 #include "rust/cxx.h"
 #include <chrono>
 
@@ -20,6 +19,7 @@ using json = nlohmann::json;
 namespace detersl::server {
     
 void register_and_schedule_json(){
+    detersl::worker::Scheduling scheduling;
     httplib::Server server;
     server.new_task_queue = [] { return new httplib::ThreadPool(1); };
 
@@ -41,7 +41,7 @@ void register_and_schedule_json(){
 
         std::string error;
    
-        if (detersl::worker::register_wasm_function(j, &error) != 0) {
+        if (!scheduling.register_wasm_function(j, &error)) {
             res.status = 400;
             res.set_content(std::string("Failed to register WASM function: ") + error + "\n", "text/plain");
             return;
@@ -77,7 +77,7 @@ void register_and_schedule_json(){
             return;
         }
 
-        if (detersl::worker::register_workflow(workflow, &error) != 0) {
+        if (!scheduling.register_workflow(workflow, &error)) {
             res.status = 400;
             res.set_content(std::string("Failed to register workflow: ") + error + "\n", "text/plain");
             return;
@@ -119,10 +119,10 @@ void register_and_schedule_json(){
 
          if (wf_count >= delete_after_n_wf) {
             wf_count = 0;
-            detersl::worker::cleanup_resources();
+            scheduling.cleanup_resources();
         }
 
-        if (!detersl::worker::invoke_workflow(invoke, &error, &request_id)) {
+        if (!scheduling.invoke_workflow(invoke, &error, &request_id)) {
             res.status = 400;
             res.set_content(std::string("Failed to invoke workflow: ") + error + "\n", "text/plain");
             return;
@@ -141,7 +141,7 @@ void register_and_schedule_json(){
     server.Get("/workflow/status/:request_id", [&](const httplib::Request& req, httplib::Response& res) {
         const std::string request_id = req.path_params.at("request_id");
         detersl::types::WorkflowStatus status;
-        if (!detersl::worker::get_workflow_status(request_id, &status)) {
+        if (!scheduling.get_workflow_status(request_id, &status)) {
             res.status = 404;
             res.set_content("Workflow invocation not found.\n", "text/plain");
             return;
@@ -161,7 +161,7 @@ void register_and_schedule_json(){
     server.Get("/resource/:res_name", [&](const httplib::Request& req, httplib::Response& res) {
         std::string res_name = req.path_params.at("res_name");
         std::future<rust::Vec<uint8_t>> res_data;
-        bool found = detersl::worker::get_resource(res_name, res_data);
+        bool found = scheduling.get_resource(res_name, res_data);
 
         if (!found) {
             res.status = 404;

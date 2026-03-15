@@ -1,37 +1,10 @@
 #include "scheduling.hpp"
 
-#include <dlfcn.h>
-#include <cctype>
-#include <atomic>
-#include <memory>
-#include <mutex>
-#include <unordered_set>
-#include <deque>
-#include <vector>
-#include <fstream>
-#include "cpp/cown.h"
-#include "resource.hpp"
-#include "types.hpp"
-#include "wasm-func.hpp"
-#include "wasm-runner.hpp"
-#include "thread-safe-queue.hpp"
-#include "graph.hpp"
-#include "metrics.hpp"
-#include "utils.hpp"
-
-#include <nlohmann/json.hpp>
-
 using json = nlohmann::json;
 
 namespace detersl::worker {
 
-std::unordered_map<std::string, std::pair<cown_ptr<detersl::types::Resource>, uint64_t>> resource_map;
-BasicMPSCQueue<std::pair<std::string, uint64_t>> deleted_resources_queue;
-std::unordered_map<std::string, detersl::func::WasmFuncInfo> wasm_func_registry;
-std::unordered_map<std::string, Node*> workflow_registry;
-int next_workflow_request_id = 1;
-
-static void schedule_function(detersl::func::WasmFuncInfo&& func_info,
+void Scheduling::schedule_function(detersl::func::WasmFuncInfo&& func_info,
                                       detersl::types::WorkflowInvocation& invocation,
                                       const detersl::types::BranchGuard* guard)
 {
@@ -81,7 +54,7 @@ static void schedule_function(detersl::func::WasmFuncInfo&& func_info,
     read_only_resources.size()
   };
 
-  auto run = [func_info = std::move(func_info), local_refs = std::move(local_ref_counts), can_abort, failed](auto rw_c, auto ro_c){
+  auto run = [func_info = std::move(func_info), local_refs = std::move(local_ref_counts), can_abort, failed, this](auto rw_c, auto ro_c){
     detersl::runner::WasmRunner runner(rw_c, ro_c, std::move(func_info));
     
     bool ok = runner.run();
@@ -130,7 +103,7 @@ static void schedule_function(detersl::func::WasmFuncInfo&& func_info,
   };
 }
 
-static bool run_task_node(Node* node,
+bool Scheduling::run_task_node(Node* node,
                           detersl::types::WorkflowInvocation& invocation,
                           const detersl::types::BranchGuard* guard,
                           std::string* err) {
@@ -175,7 +148,7 @@ static bool run_task_node(Node* node,
   return true;
 }
 
-static bool schedule_choice_node(const Node* node,
+bool Scheduling::schedule_choice_node(const Node* node,
                                  detersl::types::WorkflowInvocation& invocation,
                                  cown_ptr<detersl::types::ChoiceControl> control,
                                  const detersl::types::BranchGuard* guard,
@@ -298,7 +271,7 @@ static bool schedule_choice_node(const Node* node,
   return true;
 }
 
-void schedule_commit_behaviour(detersl::types::WorkflowInvocation& invocation) {
+void Scheduling::schedule_commit_behaviour(detersl::types::WorkflowInvocation& invocation) {
   std::shared_ptr<detersl::metrics::InvocationMetrics> metrics = invocation.metrics;
   const cown_ptr<detersl::types::Resource> invocation_cown = invocation.invocation_cown;
   if(!invocation.request.can_abort){
@@ -327,7 +300,7 @@ void schedule_commit_behaviour(detersl::types::WorkflowInvocation& invocation) {
   }
  
   cown_array<detersl::types::Resource> cowns{commit_cowns.data(), commit_cowns.size()};
-  when(cowns, invocation_cown) << [failed, local_ref_counts, commit_resource_names, metrics](auto resources, auto ic) {
+  when(cowns, invocation_cown) << [failed, local_ref_counts, commit_resource_names, metrics, this](auto resources, auto ic) {
     const bool is_failed = failed->load(std::memory_order_acquire);
     for (size_t i = 0; i < resources.length; ++i) {
       auto& res = *resources.array[i];
@@ -345,7 +318,7 @@ void schedule_commit_behaviour(detersl::types::WorkflowInvocation& invocation) {
   
 }
 
-static bool schedule_graph(Node* node,
+bool Scheduling::schedule_graph(Node* node,
                           detersl::types::WorkflowInvocation& invocation,
                           std::string* err)
 {
@@ -419,7 +392,7 @@ static bool schedule_graph(Node* node,
   return ok;
 }
 
-int register_wasm_function(const nlohmann::json& j, std::string* err)
+bool Scheduling::register_wasm_function(const nlohmann::json& j, std::string* err)
 {
 
   static rust::Box<FfiExecutioner> compile_exec = new_executioner(*engine, new_cpp_kv(new KVInterface()));
@@ -446,34 +419,34 @@ int register_wasm_function(const nlohmann::json& j, std::string* err)
     
     wasm_func_registry[info.func_name] = std::move(info);
 
-    return 0;
+    return true;
   } catch (const rust::Error& e) {
     if (err) *err = e.what();
-    return -1;
+    return false;
   } catch (const std::exception& e) {
     if (err) *err = e.what();
-    return -1;
+    return false;
   }
 }
 
-int register_workflow(const detersl::types::Workflow& workflow, std::string* err)
+bool Scheduling::register_workflow(const detersl::types::Workflow& workflow, std::string* err)
 {
   if (workflow.ID.empty()) {
     if (err) *err = "workflow id is required";
-    return -1;
+    return false;
   }
 
   if (workflow_registry.find(workflow.ID) != workflow_registry.end()) {
     if (err) *err = "workflow already registered: " + workflow.ID;
-    return -1;
+    return false;
   }
   Node* root = BuildFromWorkflow(workflow, err);
   if (!root) return -1;
   workflow_registry.emplace(workflow.ID, root);
-  return 0;
+  return true;
 }
 
-bool schedule_workflow(detersl::types::WorkflowInvocation& invocation, std::string* err)
+bool Scheduling::schedule_workflow(detersl::types::WorkflowInvocation& invocation, std::string* err)
 {
   auto it = workflow_registry.find(invocation.request.WorkflowID);
   if (it == workflow_registry.end()) {
@@ -484,7 +457,7 @@ bool schedule_workflow(detersl::types::WorkflowInvocation& invocation, std::stri
   return schedule_graph(root, invocation, err);
 }
 
-bool invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err, std::string* request_id)
+bool Scheduling::invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err, std::string* request_id)
 {
   detersl::types::Workflow workflow;
   {
@@ -527,7 +500,7 @@ bool invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err, 
   return scheduled;
 }
 
-void cleanup_resources()
+void Scheduling::cleanup_resources()
 {
   std::pair<std::string, uint64_t> res;
   while(!((res = deleted_resources_queue.pop()).first).empty()){
@@ -539,7 +512,7 @@ void cleanup_resources()
   }
 }
 
-bool get_resource(const std::string &res_name, std::future<rust::Vec<uint8_t>>& res_data) {
+bool Scheduling::get_resource(const std::string &res_name, std::future<rust::Vec<uint8_t>>& res_data) {
   auto it = resource_map.find(res_name);
 
   if (it == resource_map.end()) {
@@ -557,7 +530,7 @@ bool get_resource(const std::string &res_name, std::future<rust::Vec<uint8_t>>& 
   return true;
 }
 
-bool get_workflow_status(const std::string& request_id, detersl::types::WorkflowStatus* status) {
+bool Scheduling::get_workflow_status(const std::string& request_id, detersl::types::WorkflowStatus* status) {
   auto metrics = detersl::metrics::get_invocation_metrics(request_id);
   if (!metrics) {
     return false;
