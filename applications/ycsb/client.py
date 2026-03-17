@@ -308,6 +308,15 @@ def benchmark_runner() -> dict[str, dict]:
         timestamp_futures[key]["completed_at_ms"] = resp["completed_at"]
 
     return timestamp_futures
+
+def get_value(key : str):
+    resp = http_call_json(
+            base_url= DETERSL_HOST,
+            path=f"/resource/{key}",
+            method="POST",
+            timeout_s= DEFAULT_TIMEOUT,
+            )
+    return resp.text
         
 def main():
     print("Generate and push workload to DeterSL")
@@ -315,6 +324,20 @@ def main():
     ycsb_init(key_list)
 
     results = benchmark_runner()
+
+    if run_with_validation:
+        records = []
+        for key in key_list:
+            req = request.Request(url=f"{DETERSL_HOST}/resource/{str(key)}", method="GET")
+            with request.urlopen(req, timeout=DEFAULT_TIMEOUT) as resp:
+                raw = resp.read()
+                status = int(resp.status)
+            if(status == 200):
+                records.append((f"[{key}, {int.from_bytes(raw)}]", int(time.time() * 1000)))
+
+        pd.DataFrame.from_records(records,
+                                  columns=["KeyVal", "timestamp"]).to_csv(f"{SAVE_DIR}/output.csv",
+                                                                                          index=False)
 
     pd.DataFrame({"request_id": list(results.keys()),
                 "latency_ms": [res["latency_ms"] for res in results.values()],

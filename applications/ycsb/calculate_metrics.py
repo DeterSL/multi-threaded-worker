@@ -1,9 +1,10 @@
 import json
 import math
 import sys
-
+from urllib import error, request
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 # A run with sensible defaults:
 # python calculate_metrics.py results 0 10 100 0.0 1 true
@@ -23,6 +24,8 @@ def main(
         exp_name = f"ycsbt_zipf_{zipf_const}_{input_rate * client_threads}"
     else:
         exp_name = f"ycsbt_uni_{input_rate * client_threads}"
+
+    starting_money = 1_000_000
 
     origin_input_msgs = pd.read_csv(
         f"{save_dir}/client_requests.csv",
@@ -109,9 +112,47 @@ def main(
     }
 
     if run_with_validation:
-        raise ValueError(
-            "run_with_validation=true requires output responses, but this mode uses only client_requests.csv."
-        )
+        output_msgs = pd.read_csv(f"{save_dir}/output.csv", dtype={"timestamp": np.uint64},
+                            low_memory=False).sort_values("timestamp")
+        # Consistency test
+        verification_state_reads = {int(e[0]): int(e[1]) for e in [res.strip("][").split(", ")
+                                                                for res in output_msgs["KeyVal"].tail(n_keys)]}
+              
+        verification_total = sum(verification_state_reads.values())
+
+        total_consistent: bool = verification_total == n_keys * starting_money
+        res_dict["total_consistent"] = total_consistent
+        res_dict["total_money"] = verification_total
+        transaction_operations = [(int(op[0]), int(op[1]))
+                                for op in [op.split(" ")[1].split("->")
+                                            for op in origin_input_msgs["op"]]]
+        true_res = dict.fromkeys(range(n_keys), starting_money)
+
+        for op in tqdm(transaction_operations):
+            send_key, rcv_key = op
+            true_res[send_key] -= 1
+            true_res[rcv_key] += 1
+
+        are_we_consistent = true_res == verification_state_reads
+        res_dict["are_we_consistent"] = are_we_consistent
+
+        missing_verification_keys = []
+        wrong_values = []
+        for res in true_res.items():
+            key, value = res
+            if key in verification_state_reads and verification_state_reads[key] != value:
+                wrong_values.append(f"For key: {key}| the value should be {value}"
+                                    f" but it is {verification_state_reads[key]} | "
+                                    f"{verification_state_reads[key] - value}")
+            elif key not in verification_state_reads:
+                missing_verification_keys.append(key)
+        missing_verification_keys = len(missing_verification_keys)
+        res_dict["missing_verification_keys"] = missing_verification_keys
+        res_dict["wrong_values"] = wrong_values
+
+        if not are_we_consistent:
+            print(f"{'\033[91m'}NOT CONSISTENT: {verification_total} != {n_keys * starting_money}{'\033[0m'}")
+
     print(f"Done. Persisted metrics in {save_dir}/{exp_name}.json")
     with open(f"{save_dir}/{exp_name}.json", "w", encoding="utf-8") as f:
         json.dump(res_dict, f, ensure_ascii=False, indent=4)
