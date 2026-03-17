@@ -13,7 +13,7 @@ namespace detersl {
        
         class WasmExecution {
             public:
-                explicit WasmExecution(DeterSLEngine& engine, detersl::kv::WasmExecEnvKV* kv) :
+                explicit WasmExecution(const DeterSLEngine& engine, detersl::kv::WasmExecEnvKV* kv) :
                     exec_(new_executioner(engine, new_cpp_kv(kv))), kv_(kv) {
                 }
 

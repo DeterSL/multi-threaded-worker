@@ -9,6 +9,9 @@
 #include "wasm-runner.hpp"
 #include "rust/cxx.h"
 #include <chrono>
+#include <mach/mach.h>
+#include <mach/thread_policy.h>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -19,6 +22,11 @@ using json = nlohmann::json;
 namespace detersl::server {
     
 void register_and_schedule_json(){
+    thread_affinity_policy_data_t policy = { .affinity_tag = 1 };
+    thread_policy_set(mach_thread_self(),
+                    THREAD_AFFINITY_POLICY,
+                    (thread_policy_t)&policy,
+                    1);
     detersl::worker::Scheduling scheduling;
     httplib::Server server;
     server.new_task_queue = [] { return new httplib::ThreadPool(1); };
@@ -87,7 +95,7 @@ void register_and_schedule_json(){
         res.set_content("Workflow registered.\n", "text/plain");
     });
 
-    server.Post("/workflow/invoke", [&](const httplib::Request& req, httplib::Response& res) {
+    server.Post("/workflow/invoke", [&](const httplib::Request& req, httplib::Response& res) {                    
         const int delete_after_n_wf = 100;
         int wf_count = 0;
 
@@ -133,6 +141,71 @@ void register_and_schedule_json(){
         json body = {
             {"status", "scheduled"},
             {"request_id", request_id},
+        };
+        res.status = 202;
+        res.set_content(body.dump(), "application/json");
+    });
+
+    server.Post("/workflow/invoke_batch", [&](const httplib::Request& req, httplib::Response& res) {
+        if (req.body.empty()) {
+            res.status = 400;
+            res.set_content("Missing JSON body.\n", "text/plain");
+            return;
+        }
+
+        nlohmann::json j;
+        try {
+            j = nlohmann::json::parse(req.body);
+        } catch (const nlohmann::json::parse_error& e) {
+            res.status = 400;
+            res.set_content(std::string("JSON parse error: ") + e.what() + "\n", "text/plain");
+            return;
+        }
+
+        std::vector<detersl::types::InvokeDTO> invocations;
+        try {
+            if (j.is_array()) {
+                invocations = j.get<std::vector<detersl::types::InvokeDTO>>();
+            } else if (j.contains("invocations")) {
+                invocations = j.at("invocations").get<std::vector<detersl::types::InvokeDTO>>();
+            } else {
+                res.status = 400;
+                res.set_content("Invalid batch payload: expected array or {\"invocations\": [...]}.\n", "text/plain");
+                return;
+            }
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content(std::string("Invalid workflow invocations: ") + e.what() + "\n", "text/plain");
+            return;
+        }
+
+        if (invocations.empty()) {
+            res.status = 400;
+            res.set_content("Batch is empty.\n", "text/plain");
+            return;
+        }
+
+        std::vector<std::string> request_ids;
+        request_ids.reserve(invocations.size());
+
+        for (size_t i = 0; i < invocations.size(); ++i) {
+            std::string error;
+            std::string request_id;
+            if (!scheduling.invoke_workflow(invocations[i], &error, &request_id)) {
+                json body = {
+                    {"error", error},
+                    {"failed_index", i},
+                };
+                res.status = 400;
+                res.set_content(body.dump(), "application/json");
+                return;
+            }
+            request_ids.push_back(request_id);
+        }
+
+        json body = {
+            {"status", "scheduled"},
+            {"request_ids", request_ids},
         };
         res.status = 202;
         res.set_content(body.dump(), "application/json");

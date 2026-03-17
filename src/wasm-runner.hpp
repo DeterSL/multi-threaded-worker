@@ -12,7 +12,7 @@
 using namespace verona::rt;
 using namespace verona::cpp;
 
-extern rust::Box<DeterSLEngine> engine;
+extern const rust::Box<DeterSLEngine> engine;
 
 namespace detersl {
     namespace runner {

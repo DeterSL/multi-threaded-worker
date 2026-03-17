@@ -28,7 +28,7 @@ STARTING_MONEY = 1_000_000
 ZIPF_CONST = float(sys.argv[3])
 messages_per_second = int(sys.argv[4])
 sleeps_per_second = 100
-sleep_time = 0.0085
+sleep_time = 0.005
 seconds = int(sys.argv[5])
 key_list: list[int] = list(range(N_ENTITIES))
 DETERSL_HOST: str = "http://0.0.0.0:6666"
@@ -37,6 +37,7 @@ SAVE_DIR: str = sys.argv[6]
 warmup_seconds: int = int(sys.argv[7])
 run_with_validation = sys.argv[8].lower() == "true"
 poll_sleep = 0.001
+batch_size = 10
 
 @dataclass
 class HttpResult:
@@ -170,6 +171,15 @@ def invoke_workflow(payload):
                 )
     return resp_body.json_data
 
+def invoke_workflow_batch(payloads: list[dict]) -> HttpResult:
+    return http_call_json(
+                base_url= DETERSL_HOST,
+                path="/workflow/invoke_batch",
+                method="POST",
+                timeout_s= DEFAULT_TIMEOUT,
+                payload={"invocations": payloads},
+                )
+
 def ycsb_init(keys: list[int]):
     register_function("write")
     register_function("transfer")
@@ -201,7 +211,8 @@ def ycsb_init(keys: list[int]):
             }
         ]
     })
-
+    req_ids = []
+    
     for key in tqdm(keys):
         payload = {
             "workflow_id" : "yscb_write",
@@ -211,8 +222,10 @@ def ycsb_init(keys: list[int]):
             }
         }
         resp = invoke_workflow(payload)
-        invocation_id = resp["request_id"]
-        wait_for_wf(invocation_id)            
+        req_ids.append(resp["request_id"])
+
+    for key in tqdm(req_ids):
+        wait_for_wf(key)
     
 def transactional_ycsb_generator(keys,
                                  n: int,
@@ -226,32 +239,68 @@ def transactional_ycsb_generator(keys,
             key2 = keys[next(zipf_gen)]
         yield "yscb_transfer", str(key), str(key2)
 
-def benchmark_runner() -> dict[bytes, dict]:
+def benchmark_runner() -> dict[str, dict]:
     print("Benchmark starting")
     ycsb_generator = transactional_ycsb_generator(key_list, N_ENTITIES, zipf_const=ZIPF_CONST)
-    timestamp_futures: dict[bytes, dict] = {}
+    timestamp_futures: dict[str, dict] = {}
+    errors = 0
+    batch_payloads: list[dict] = []
+    batch_ops: list[str] = []
+
+    def flush_batch() -> None:
+        nonlocal errors, batch_payloads, batch_ops
+        if not batch_payloads:
+            return
+        resp = invoke_workflow_batch(batch_payloads)
+        if (not resp.ok) or (not resp.json_data) or ("request_ids" not in resp.json_data):
+            errors += 1
+            batch_payloads = []
+            batch_ops = []
+            return
+        request_ids = resp.json_data["request_ids"]
+        if len(request_ids) != len(batch_ops):
+            errors += 1
+            batch_payloads = []
+            batch_ops = []
+            return
+        for request_id, op in zip(request_ids, batch_ops):
+            timestamp_futures[request_id] = {"op": op}
+        batch_payloads = []
+        batch_ops = []
+
+    total_requests = messages_per_second * seconds
+    total_batches = max(1, (total_requests + batch_size - 1) // batch_size)
 
     start = timer()
-    for second in range(seconds):
-        sec_start = timer()
-        step = max(1, messages_per_second // sleeps_per_second)
-        for i in range(messages_per_second):
-            if i % step == 0:
-                time.sleep(sleep_time)
+    for batch_index in range(total_batches):
+        batch_target = start + (batch_index / (total_batches / seconds))
+        while True:
+            now = timer()
+            delay = batch_target - now
+            if delay <= 0:
+                break
+            time.sleep(min(delay, 0.001))
+
+        remaining = total_requests - (batch_index * batch_size)
+        current_batch = min(batch_size, remaining)
+        for _ in range(current_batch):
             wf_id, key1, key2 = next(ycsb_generator)
-            future = invoke_workflow({
+            batch_payloads.append({
                 "workflow_id" : wf_id,
                 "input" : {"from" : key1, "to" : key2}
-                })
-            timestamp_futures[future["request_id"]] = {"op": f"{wf_id} {key1}->{key2}"}
-        sec_end = timer()
-        lps = sec_end - sec_start
-        if lps < 1:
-            time.sleep(1 - lps)
-        sec_end2 = timer()
-        print(f"{second} | Latency per second: {sec_end2 - sec_start}")
+            })
+            batch_ops.append(f"{wf_id} {key1}->{key2}")
+        flush_batch()
+
+        now = timer()
+        if now - start >= (batch_index + 1):
+            print(f"{batch_index + 1} | Batches sent: {batch_index + 1}")
+
     end = timer()
+    print(f"Average batch interval: {(end - start) / total_batches}")
     print(f"Average latency per second: {(end - start) / seconds}")
+    if errors:
+        print(f"Batch errors: {errors}")
 
     for key in tqdm(timestamp_futures.keys()):
         resp = wait_for_wf(key)

@@ -2,14 +2,16 @@
 #include "ffi.rs.h"
 #include "http-server.hpp"
 #include "wasm-executioner.hpp"
+#include <unistd.h>
 
 using namespace verona::rt;
 using namespace verona::cpp;
 
-rust::Box<DeterSLEngine> engine = new_detersl_engine(1024);
+const rust::Box<DeterSLEngine> engine = new_detersl_engine(1024);
 
 int main(int argc, char **argv)
 {
+  std::cout << "Proc id is : " << std::to_string(getpid()) << std::endl;
   size_t num_threads = 8;
   if(argc == 2){
     try{

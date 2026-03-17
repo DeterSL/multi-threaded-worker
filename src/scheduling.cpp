@@ -1,8 +1,74 @@
 #include "scheduling.hpp"
+#include <time.h>
 
 using json = nlohmann::json;
 
 namespace detersl::worker {
+
+namespace {
+struct TimingStats {
+  std::atomic<uint64_t> count{0};
+  std::atomic<uint64_t> total_wait_us{0};
+  std::atomic<uint64_t> total_exec_us{0};
+  std::atomic<uint64_t> total_exec_cpu_us{0};
+  std::atomic<uint64_t> max_wait_us{0};
+  std::atomic<uint64_t> max_exec_us{0};
+  std::atomic<uint64_t> max_exec_cpu_us{0};
+  std::atomic<int64_t> last_log_sec{0};
+};
+
+TimingStats timing_stats;
+
+inline void update_max(std::atomic<uint64_t>& max_val, uint64_t v) {
+  uint64_t cur = max_val.load(std::memory_order_relaxed);
+  while (v > cur && !max_val.compare_exchange_weak(cur, v, std::memory_order_relaxed)) {
+  }
+}
+
+inline int64_t now_sec() {
+  return std::chrono::duration_cast<std::chrono::seconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+inline void maybe_log_timing() {
+  const int64_t sec = now_sec();
+  int64_t last = timing_stats.last_log_sec.load(std::memory_order_relaxed);
+  if (sec == last) {
+    return;
+  }
+  if (!timing_stats.last_log_sec.compare_exchange_strong(last, sec, std::memory_order_relaxed)) {
+    return;
+  }
+  const uint64_t c = timing_stats.count.exchange(0, std::memory_order_relaxed);
+  if (c == 0) {
+    timing_stats.total_wait_us.store(0, std::memory_order_relaxed);
+    timing_stats.total_exec_us.store(0, std::memory_order_relaxed);
+    timing_stats.total_exec_cpu_us.store(0, std::memory_order_relaxed);
+    timing_stats.max_wait_us.store(0, std::memory_order_relaxed);
+    timing_stats.max_exec_us.store(0, std::memory_order_relaxed);
+    timing_stats.max_exec_cpu_us.store(0, std::memory_order_relaxed);
+    return;
+  }
+  const uint64_t wait_us = timing_stats.total_wait_us.exchange(0, std::memory_order_relaxed);
+  const uint64_t exec_us = timing_stats.total_exec_us.exchange(0, std::memory_order_relaxed);
+  const uint64_t exec_cpu_us = timing_stats.total_exec_cpu_us.exchange(0, std::memory_order_relaxed);
+  const uint64_t max_wait = timing_stats.max_wait_us.exchange(0, std::memory_order_relaxed);
+  const uint64_t max_exec = timing_stats.max_exec_us.exchange(0, std::memory_order_relaxed);
+  const uint64_t max_exec_cpu = timing_stats.max_exec_cpu_us.exchange(0, std::memory_order_relaxed);
+  const double avg_wait = static_cast<double>(wait_us) / static_cast<double>(c);
+  const double avg_exec = static_cast<double>(exec_us) / static_cast<double>(c);
+  const double avg_exec_cpu = static_cast<double>(exec_cpu_us) / static_cast<double>(c);
+  std::cout << "[timing] tasks=" << c
+            << " avg_wait_us=" << avg_wait
+            << " avg_exec_us=" << avg_exec
+            << " avg_exec_cpu_us=" << avg_exec_cpu
+            << " max_wait_us=" << max_wait
+            << " max_exec_us=" << max_exec
+            << " max_exec_cpu_us=" << max_exec_cpu
+            << "\n";
+}
+} // namespace
 
 void Scheduling::schedule_function(detersl::func::WasmFuncInfo&& func_info,
                                       detersl::types::WorkflowInvocation& invocation,
@@ -54,10 +120,39 @@ void Scheduling::schedule_function(detersl::func::WasmFuncInfo&& func_info,
     read_only_resources.size()
   };
 
+  const auto scheduled_at = std::chrono::steady_clock::now();
+
   auto run = [func_info = std::move(func_info), local_refs = std::move(local_ref_counts), can_abort, failed, this](auto rw_c, auto ro_c){
+    const auto exec_start = std::chrono::steady_clock::now();
+    timespec cpu_start{};
+    const int cpu_start_ok = clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu_start);
     detersl::runner::WasmRunner runner(rw_c, ro_c, std::move(func_info));
     
     bool ok = runner.run();
+    const auto exec_end = std::chrono::steady_clock::now();
+    const uint64_t exec_us = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(exec_end - exec_start).count());
+    timespec cpu_end{};
+    const int cpu_end_ok = clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu_end);
+    uint64_t exec_cpu_us = 0;
+    if (cpu_start_ok == 0 && cpu_end_ok == 0) {
+      int64_t sec = static_cast<int64_t>(cpu_end.tv_sec) - static_cast<int64_t>(cpu_start.tv_sec);
+      int64_t nsec = static_cast<int64_t>(cpu_end.tv_nsec) - static_cast<int64_t>(cpu_start.tv_nsec);
+      if (nsec < 0) {
+        sec -= 1;
+        nsec += 1000000000LL;
+      }
+      if (sec >= 0) {
+        exec_cpu_us = static_cast<uint64_t>(sec) * 1000000ULL +
+                      static_cast<uint64_t>(nsec / 1000LL);
+      }
+    }
+    timing_stats.total_exec_us.fetch_add(exec_us, std::memory_order_relaxed);
+    timing_stats.total_exec_cpu_us.fetch_add(exec_cpu_us, std::memory_order_relaxed);
+    timing_stats.count.fetch_add(1, std::memory_order_relaxed);
+    update_max(timing_stats.max_exec_us, exec_us);
+    update_max(timing_stats.max_exec_cpu_us, exec_cpu_us);
+    maybe_log_timing();
 
     if(!can_abort){
       // commit global resources directly since workflow cannot abort
@@ -86,19 +181,31 @@ void Scheduling::schedule_function(detersl::func::WasmFuncInfo&& func_info,
   if (guard) {
     cown_ptr<detersl::types::ChoiceControl> guard_cown = guard->control;
     size_t guard_edge = guard->edge_index;
-    when(rw_cowns, read(ro_cowns), read(guard_cown), read(invocation.invocation_cown)) << [guard_edge, run, failed, can_abort](auto rw_c, auto ro_c, auto guard_c, auto ic) {  
+    when(rw_cowns, read(ro_cowns), read(guard_cown), read(invocation.invocation_cown)) << [guard_edge, run, failed, can_abort, scheduled_at](auto rw_c, auto ro_c, auto guard_c, auto ic) {  
       if (!guard_c->decided || guard_c->selected != guard_edge || (failed->load(std::memory_order_acquire) && can_abort) ) {
         return;
       }
+      const uint64_t wait_us = static_cast<uint64_t>(
+          std::chrono::duration_cast<std::chrono::microseconds>(
+              std::chrono::steady_clock::now() - scheduled_at)
+              .count());
+      timing_stats.total_wait_us.fetch_add(wait_us, std::memory_order_relaxed);
+      update_max(timing_stats.max_wait_us, wait_us);
       run(rw_c, ro_c);
     };
     return;
   }
 
-  when(rw_cowns, read(ro_cowns), read(invocation.invocation_cown)) << [run, failed, can_abort](auto rw_c, auto ro_c, auto ic) {  
+  when(rw_cowns, read(ro_cowns), read(invocation.invocation_cown)) << [run, failed, can_abort, scheduled_at](auto rw_c, auto ro_c, auto ic) {  
     if(failed->load(std::memory_order_acquire) && can_abort){
       return;
     }
+    const uint64_t wait_us = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - scheduled_at)
+            .count());
+    timing_stats.total_wait_us.fetch_add(wait_us, std::memory_order_relaxed);
+    update_max(timing_stats.max_wait_us, wait_us);
     run(rw_c, ro_c);
   };
 }
@@ -492,7 +599,7 @@ bool Scheduling::invoke_workflow(const detersl::types::InvokeDTO& invoke, std::s
   
   const bool scheduled = schedule_workflow(invocation, err);
 
-  detersl::metrics::prune_completed_invocation_metrics();
+  //detersl::metrics::prune_completed_invocation_metrics();
   
   if (request_id) {
     *request_id = invocation_id;
