@@ -1,0 +1,25 @@
+{
+  "cache_enabled": true,
+  "strategy": "cranelift",
+  "memory_init_cow": true,
+
+  "memory_guard_size": -1,
+  "memory_reservation": -1,
+
+  "cache_size": 1024,
+
+  "allocation": {
+    "kind": "pooling",
+    "pooling": {
+      "total_memories": 128,
+      "max_memory_size": 268435456,
+      "total_tables": 128,
+      "table_elements": 7000,
+      "total_core_instances": 256,
+      "linear_memory_keep_resident": -1,
+      "table_keep_resident": 2097152,
+      "decommit_batch_size": 1,
+      "max_unused_warm_slots": 200
+    }
+  }
+}

@@ -103,6 +103,14 @@ target_link_libraries(detersl-worker PRIVATE
     pthread
 )
 
+target_compile_options(detersl_worker_core PRIVATE
+  $<$<CONFIG:Release>:-O3 -march=native>
+)
+
+target_link_options(detersl-worker PRIVATE
+  $<$<CONFIG:Release>:-flto>
+)
+
 target_include_directories(detersl-worker PRIVATE ${OPENSSL_INCLUDE_DIR})
 target_link_libraries(detersl-worker PRIVATE ${OPENSSL_CRYPTO_LIBRARY} ${OPENSSL_SSL_LIBRARY})
 

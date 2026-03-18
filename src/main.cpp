@@ -7,7 +7,7 @@
 using namespace verona::rt;
 using namespace verona::cpp;
 
-const rust::Box<DeterSLEngine> engine = new_detersl_engine(1024);
+const rust::Box<DeterSLEngine> engine = new_detersl_engine(std::string("./config.json"));
 
 int main(int argc, char **argv)
 {

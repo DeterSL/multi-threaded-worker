@@ -46,9 +46,9 @@ struct FuncInputEvent {
     std::string data;
 
     static FuncInputEvent from_json(const nlohmann::json& j) {
-        FuncInputEvent e;  
+        FuncInputEvent e;
         e.type = j.value("type", "data");
-        if (j.contains("data"))  e.data = j.at("data").get<std::string>();
+        if (j.contains("data")) e.data = j.at("data").get<std::string>();
         return e;
     }
 
@@ -160,23 +160,22 @@ struct WasmFuncInfo : public BasicFuncInfo {
     explicit WasmFuncInfo(const BasicFuncInfo& base)
       : BasicFuncInfo(base) {}
 
-    // matches config keys:
     std::string func_binary_hash;
-    FuncBinarySource func_binary_source;
+    bool fast_execution = false;
 
+    FuncBinarySource func_binary_source;
     FuncInputEvent func_input_event;
     FuncOutputEvent func_output_event;
-
     FuncLinkOpt func_link_opt;
     FuncExecutionPolicy func_execution_policy;
-
     FuncInitialValues func_initial_values;
 
     static WasmFuncInfo from_json(const nlohmann::json& j) {
         BasicFuncInfo base = BasicFuncInfo::from_json(j);
         WasmFuncInfo info(base);
 
-        info.func_binary_hash = require_field<std::string>(j, "func_binary_hash");
+        info.func_binary_hash      = require_field<std::string>(j, "func_binary_hash");
+        info.fast_execution        = j.value("fast_execution", false);
         info.func_binary_source    = FuncBinarySource::from_json(j.at("func_binary_source"));
         info.func_input_event      = FuncInputEvent::from_json(j.at("func_input_event"));
         info.func_output_event     = FuncOutputEvent::from_json(j.at("func_output_event"));
@@ -199,6 +198,7 @@ struct WasmFuncInfo : public BasicFuncInfo {
         nlohmann::json j = to_json_base();
 
         j["func_binary_hash"] = func_binary_hash;
+        j["fast_execution"] = fast_execution;
         j["func_binary_source"] = func_binary_source.to_json();
 
         j["func_input_event"] = func_input_event.to_json();
@@ -212,5 +212,5 @@ struct WasmFuncInfo : public BasicFuncInfo {
         return j;
     }
 };
-} // namespace detersl::func
 
+} // namespace detersl::func
