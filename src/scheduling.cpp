@@ -553,26 +553,12 @@ bool Scheduling::register_workflow(const detersl::types::Workflow& workflow, std
   return true;
 }
 
-bool Scheduling::schedule_workflow(detersl::types::WorkflowInvocation& invocation, std::string* err)
-{
-  auto it = workflow_registry.find(invocation.request.WorkflowID);
-  if (it == workflow_registry.end()) {
-    if (err) *err = "unknown workflow id: " + invocation.request.WorkflowID;
-    return false;
-  }
-  Node* root = it->second;
-  return schedule_graph(root, invocation, err);
-}
-
 bool Scheduling::invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err, std::string* request_id)
 {
-  detersl::types::Workflow workflow;
-  {
-    auto it = workflow_registry.find(invoke.WorkflowID);
-    if (it == workflow_registry.end()) {
-      if (err) *err = "unknown workflow id: " + invoke.WorkflowID;
-      return false;
-    }
+  auto it = workflow_registry.find(invoke.WorkflowID);
+  if (it == workflow_registry.end()) {
+    if (err) *err = "unknown workflow id: " + invoke.WorkflowID;
+    return false;
   }
 
   std::string invocation_id = invoke.WorkflowID + ":" + std::to_string(next_workflow_request_id++);
@@ -580,8 +566,8 @@ bool Scheduling::invoke_workflow(const detersl::types::InvokeDTO& invoke, std::s
   detersl::types::WorkflowRequest request{
     .WorkflowID = invoke.WorkflowID,
     .Input = invoke.Input,
-    .RequestID = invocation_id,
-    .can_abort = invoke.can_abort
+    .can_abort = invoke.can_abort,
+    .RequestID = invocation_id
   };
   
   detersl::types::WorkflowInvocation invocation{
@@ -597,14 +583,12 @@ bool Scheduling::invoke_workflow(const detersl::types::InvokeDTO& invoke, std::s
   
   detersl::metrics::insert_invocation_metric(invocation_id, invocation.metrics);
   
-  const bool scheduled = schedule_workflow(invocation, err);
-
-  //detersl::metrics::prune_completed_invocation_metrics();
+  detersl::metrics::prune_completed_invocation_metrics();
   
   if (request_id) {
     *request_id = invocation_id;
   }
-  return scheduled;
+  return schedule_graph(it->second, invocation, err);;
 }
 
 void Scheduling::cleanup_resources()

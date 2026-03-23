@@ -9,8 +9,6 @@
 #include "wasm-runner.hpp"
 #include "rust/cxx.h"
 #include <chrono>
-#include <mach/mach.h>
-#include <mach/thread_policy.h>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -22,11 +20,6 @@ using json = nlohmann::json;
 namespace detersl::server {
     
 void register_and_schedule_json(){
-    thread_affinity_policy_data_t policy = { .affinity_tag = 1 };
-    thread_policy_set(mach_thread_self(),
-                    THREAD_AFFINITY_POLICY,
-                    (thread_policy_t)&policy,
-                    1);
     detersl::worker::Scheduling scheduling;
     httplib::Server server;
     server.new_task_queue = [] { return new httplib::ThreadPool(1); };
@@ -147,6 +140,7 @@ void register_and_schedule_json(){
     });
 
     server.Post("/workflow/invoke_batch", [&](const httplib::Request& req, httplib::Response& res) {
+        const auto exec_start = std::chrono::steady_clock::now();
         if (req.body.empty()) {
             res.status = 400;
             res.set_content("Missing JSON body.\n", "text/plain");
@@ -207,6 +201,10 @@ void register_and_schedule_json(){
             {"status", "scheduled"},
             {"request_ids", request_ids},
         };
+        const auto exec_end = std::chrono::steady_clock::now();
+        const uint64_t exec_us = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(exec_end - exec_start).count());
+        std::cout << "executed " <<  request_ids.size() << " wfs in " << exec_us << " us." << std::endl;
         res.status = 202;
         res.set_content(body.dump(), "application/json");
     });
