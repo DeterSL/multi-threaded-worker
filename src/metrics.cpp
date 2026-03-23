@@ -37,7 +37,7 @@ void insert_invocation_metric(const std::string& request_id, const std::shared_p
 }
 
 void prune_completed_invocation_metrics() {
-  constexpr size_t max_tracked_invocations = 1000000;
+  constexpr size_t max_tracked_invocations = 10000000;
   std::lock_guard<std::mutex> lock(metrics_mutex);
   if (invocation_metrics_index.size() <= max_tracked_invocations) {
     return;
