@@ -2,6 +2,7 @@
 #include "ffi.rs.h"
 #include "http-server.hpp"
 #include "wasm-executioner.hpp"
+#include <string>
 
 using namespace verona::rt;
 using namespace verona::cpp;

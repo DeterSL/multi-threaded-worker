@@ -85,7 +85,6 @@ bool resolve_resources(const Node* node,
   }
   nlohmann::json &invocation_resources = invocation.request.Input;
   std::unordered_map<std::string, cown_ptr<detersl::types::Resource>> &workflow_resources = invocation.workflow_resources;
-  std::string &request_id = invocation.request.RequestID;
 
   for (const ResourceBinding &cur : node->resource_bindings) {
     if (cur.immediate) {
@@ -100,7 +99,7 @@ bool resolve_resources(const Node* node,
     std::string runtime_name;
     if (cur.is_local) {
       //local_resource
-      runtime_name = request_id + ":" + cur.key;
+      runtime_name = invocation.request.RequestID + ":" + cur.key;
       if (workflow_resources.find(runtime_name) == workflow_resources.end()) {
         workflow_resources[runtime_name] = make_cown<detersl::types::Resource>();
       }

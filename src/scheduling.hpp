@@ -50,8 +50,6 @@ class Scheduling {
 
     private:
 
-        bool schedule_workflow(detersl::types::WorkflowInvocation& invocation, std::string* err);
-
         bool schedule_graph(Node* node,
                             detersl::types::WorkflowInvocation& invocation,
                             std::string* err);
