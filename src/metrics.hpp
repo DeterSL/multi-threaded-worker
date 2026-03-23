@@ -2,6 +2,7 @@
 #include <chrono>
 #include <mutex>
 #include <atomic>
+#include <memory>
 
 namespace detersl::metrics {
 
