@@ -4,7 +4,7 @@
   "func_binary_hash": "2dd3722f66c6b298749db0f73c103877",
   "func_binary_source": {
     "type": "fs",
-    "path": "/Users/alex/Desktop/DeterSL/applications/ycsb/function/write.wasm"
+    "path": "/app/applications/ycsb/function/write.wasm"
   },
   "func_input_event": {
     "type": "data",

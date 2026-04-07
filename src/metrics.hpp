@@ -3,25 +3,33 @@
 #include <mutex>
 #include <atomic>
 #include <memory>
+#include <functional>
 
 namespace detersl::metrics {
 
 struct InvocationMetrics {
-    std::chrono::steady_clock::time_point submitted_at = std::chrono::steady_clock::now();
-    std::shared_ptr<std::atomic<bool>> failed;
-    std::atomic<bool> completed{false};
-    std::atomic<int64_t> latency_ms{-1};
-    std::atomic<int64_t> completed_at_ms{-1};
+        uint64_t invocation_id;
+        std::chrono::steady_clock::time_point submitted_at = std::chrono::steady_clock::now();
+        std::shared_ptr<std::atomic<bool>> failed;
+        std::atomic<bool> completed{false};
+        std::atomic<int64_t> latency_ms{-1};
+        std::atomic<int64_t> completed_at_ms{-1};
+        std::function<void(const uint64_t& request_id,
+                           bool failed,
+                           int64_t latency_ms,
+                           int64_t completed_at_ms)> on_complete;
 
-    InvocationMetrics(std::chrono::steady_clock::time_point submitted_at_, 
-        std::shared_ptr<std::atomic<bool>> failed_);
+        InvocationMetrics(uint64_t invocation_id_, std::chrono::steady_clock::time_point submitted_at_, 
+            std::shared_ptr<std::atomic<bool>> failed_,
+            std::function<void(const uint64_t& request_id,
+                               bool failed,
+                               int64_t latency_ms,
+                               int64_t completed_at_ms)> on_complete_ = {});
 
-    void complete();
-};
+        void complete();
+    };
 
-std::shared_ptr<InvocationMetrics> get_invocation_metrics(const std::string& request_id);
 
-void insert_invocation_metric(const std::string& request_id, const std::shared_ptr<InvocationMetrics> metric);
 
-void prune_completed_invocation_metrics();
+// void prune_completed_invocation_metrics();
 }

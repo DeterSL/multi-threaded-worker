@@ -1,7 +1,8 @@
 #include <iostream>
 #include "ffi.rs.h"
-#include "http-server.hpp"
-#include "wasm-executioner.hpp"
+#include "nats-worker.hpp"
+#include <cpp/when.h>
+#include "cpp/cown.h"
 #include <string>
 
 using namespace verona::rt;
@@ -26,11 +27,11 @@ int main(int argc, char **argv)
 
   sched.init(num_threads);
 
+  detersl::worker::Scheduling scheduling;
   // Schedule an external thread to play the role of the dispatcher
-  when() << [](){
+  when() << [&scheduling](){
     Scheduler::add_external_event_source();
-    
-    std::thread t(detersl::server::register_and_schedule_json);
+    std::thread t(detersl::nats::run_nats_worker, std::ref(scheduling));
     t.detach();
   };
 

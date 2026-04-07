@@ -11,17 +11,12 @@ namespace detersl::func {
 struct BasicFuncInfo {
     BasicFuncInfo()
       : func_name("not_specified"),
-        func_invocation_id("no id"),
-        resources(),
-        started(false),
-        finished(false) {}
+        func_invocation_id("no id"){}
 
     std::string func_name;
     std::string func_invocation_id;
     std::vector<std::string> resources;
     std::unordered_set<std::string> read_only_resources;
-    bool started;
-    bool finished;
 
     static BasicFuncInfo from_json(const nlohmann::json& j) {
         if (!j.is_object()) {
@@ -34,8 +29,6 @@ struct BasicFuncInfo {
         info.func_invocation_id = j.value("func_invocation_id", "no id");
         info.resources = j.value("resources", std::vector<std::string>{});
         info.read_only_resources = j.value("read_only_resources", std::unordered_set<std::string>{});
-        info.started   = j.value("started", false);
-        info.finished  = j.value("finished", false);
 
         return info;
     }

@@ -18,6 +18,8 @@
 #include <memory>
 #include <mutex>
 #include <unordered_set>
+#include <functional>
+#include "metrics.hpp"
 #include <deque>
 #include <vector>
 #include <fstream>
@@ -35,6 +37,12 @@ namespace detersl::worker {
 class Scheduling {
 
     public:
+        using CompletionCallback = std::function<void(const uint64_t& request_id,
+                                                     bool failed,
+                                                     int64_t latency_ms,
+                                                     int64_t completed_at_ms)>;
+
+        void set_completion_callback(CompletionCallback cb) { completion_cb_ = std::move(cb); }
 
         void cleanup_resources();
 
@@ -42,7 +50,7 @@ class Scheduling {
 
         bool register_workflow(const detersl::types::Workflow& workflow, std::string* err);
 
-        bool invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err, std::string* request_id = nullptr);
+        bool invoke_workflow(const detersl::types::InvokeDTO& request, uint64_t& id, std::string* err);
 
         bool get_resource(const std::string& res_name,  std::future<rust::Vec<uint8_t>>& res_data);
 
@@ -76,6 +84,7 @@ class Scheduling {
         std::unordered_map<std::string, detersl::func::WasmFuncInfo> wasm_func_registry;
         std::unordered_map<std::string, Node*> workflow_registry;
         int next_workflow_request_id = 1;
+        CompletionCallback completion_cb_;
 };
 
 } // namespace detersl::worker

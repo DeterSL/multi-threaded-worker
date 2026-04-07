@@ -35,6 +35,19 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cpp_httplib)
 
+FetchContent_Declare(
+    atomic_queue
+    GIT_REPOSITORY https://github.com/max0x7ba/atomic_queue.git
+    GIT_TAG        master
+)
+FetchContent_MakeAvailable(atomic_queue)
+
+find_path(NATS_INCLUDE_DIR nats/nats.h)
+find_library(NATS_LIBRARY NAMES nats nats_static)
+if (NOT NATS_INCLUDE_DIR OR NOT NATS_LIBRARY)
+    message(WARNING "NATS C client not found. You must install 'nats.c' (headers+lib).")
+endif()
+
 # ------------------------------------------------------------
 # Shared header dependencies (Verona, snmalloc, etc)
 # ------------------------------------------------------------
@@ -59,7 +72,7 @@ target_compile_definitions(detersl_common INTERFACE
     -DSNMALLOC_PASS_THROUGH
 )
 
-if (UNIX AND NOT APPLE)
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
   target_compile_options(detersl_common INTERFACE -mcx16)
 endif()
 
@@ -78,7 +91,11 @@ add_library(detersl_worker_core STATIC
     src/graph.cpp
     src/metrics.cpp
     src/utils.cpp
+    src/nats_raii.cpp
+    src/nats-worker.cpp
 )
+
+add_dependencies(detersl_worker_core detersl_rust)
 
 target_link_libraries(detersl_worker_core PUBLIC
     detersl_common
@@ -86,9 +103,21 @@ target_link_libraries(detersl_worker_core PUBLIC
     httplib::httplib
 )
 
+if (TARGET atomic_queue::atomic_queue)
+    target_link_libraries(detersl_worker_core PUBLIC atomic_queue::atomic_queue)
+else()
+    target_include_directories(detersl_worker_core PUBLIC ${atomic_queue_SOURCE_DIR}/include)
+endif()
+
 target_include_directories(detersl_worker_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${NATS_INCLUDE_DIR}
+    ${CMAKE_BINARY_DIR}/wasm-exec-env_build/cxxbridge
 )
+
+if (NATS_LIBRARY)
+    target_link_libraries(detersl_worker_core PUBLIC ${NATS_LIBRARY})
+endif()
 
 add_executable(detersl-worker 
     src/main.cpp
@@ -102,6 +131,11 @@ target_link_libraries(detersl-worker PRIVATE
     dl
     pthread
 )
+
+target_include_directories(detersl-worker PRIVATE ${NATS_INCLUDE_DIR})
+if (NATS_LIBRARY)
+  target_link_libraries(detersl-worker PRIVATE ${NATS_LIBRARY})
+endif()
 
 target_compile_options(detersl_worker_core PRIVATE
   $<$<CONFIG:Release>:-O3 -march=native>
@@ -117,4 +151,3 @@ target_link_libraries(detersl-worker PRIVATE ${OPENSSL_CRYPTO_LIBRARY} ${OPENSSL
 if (UNIX AND NOT APPLE)
   target_link_options(detersl-worker PRIVATE -Wl,--no-as-needed)
 endif()
-

@@ -18,6 +18,10 @@ using namespace verona::cpp;
 
 using json = nlohmann::json;
 
+namespace detersl::metrics {
+    struct InvocationMetrics;
+}
+
 namespace detersl {
     namespace types {
         struct Choice;
@@ -51,17 +55,17 @@ namespace detersl {
             std::vector<State> tasks;                 // json:"tasks"
         };
 
-        struct InvokeDTO {
-            std::string WorkflowID;                    // json:"workflow_id"
-            bool can_abort = true;                      // json:"can_abort"
-            nlohmann::json Input;                         // json:"input"
-        };
-
         struct WorkflowRequest {
             std::string WorkflowID;                   // json:"workflow_id"
             nlohmann::json Input;                         // json:"input"
             bool can_abort;                             // json:"can_abort"
             std::string RequestID;                     // json:"request_id"
+        };
+
+        struct InvokeDTO {
+            std::string WorkflowID;                    // json:"workflow_id"
+            bool can_abort = true;                      // json:"can_abort"
+            nlohmann::json Input;                         // json:"input"
         };
 
         struct ChoiceControl {
@@ -75,12 +79,13 @@ namespace detersl {
         };
 
         struct WorkflowInvocation {
+            uint64_t invocation_id;
             std::unordered_map<std::string, cown_ptr<detersl::types::Resource>> workflow_resources;
             std::unordered_set<std::string> workflow_rw_resources;
             cown_ptr<detersl::types::Resource> invocation_cown;
             std::shared_ptr<std::atomic<bool>> failed = std::make_shared<std::atomic<bool>>(false);
             std::shared_ptr<detersl::metrics::InvocationMetrics> metrics;
-            WorkflowRequest request;
+            InvokeDTO request;
         };
 
         struct WorkflowStatus {
@@ -88,6 +93,13 @@ namespace detersl {
             bool failed = false;
             int64_t latency_ms = -1;
             int64_t completed_at_ms = -1;
+        };
+
+        struct MetricEvent {
+            uint64_t request_id;
+            bool failed{false};
+            int64_t latency_ms{-1};
+            int64_t completed_at{-1};
         };
 
         // ---------- nlohmann::json (de)serialization ----------
@@ -173,6 +185,21 @@ namespace detersl {
             v.Input     = j.at("input").get<nlohmann::json>();
             v.RequestID = j.at("request_id").get<std::string>();
             if(j.contains("can_abort")) v.can_abort = j.at("can_abort").get<bool>();
+        }
+
+        inline void to_json(json& j, const MetricEvent& v) {
+            j = json::object();
+            j["request_id"]   = v.request_id;
+            j["failed"]      = v.failed;
+            j["latency_ms"] = v.latency_ms;
+            j["completed_at"]   = v.completed_at;
+        }
+
+        inline void from_json(const json& j, MetricEvent& v) {
+            v.request_id  = j.at("request_id").get<uint64_t>();
+            v.failed     = j.at("failed").get<bool>();
+            v.latency_ms = j.at("latency_ms").get<int64_t>();
+            v.completed_at = j.at("completed_at").get<int64_t>();
         }
     }
 }

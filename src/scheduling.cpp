@@ -1,4 +1,5 @@
 #include "scheduling.hpp"
+#include "metrics.hpp"
 
 using json = nlohmann::json;
 
@@ -117,33 +118,26 @@ bool Scheduling::run_task_node(Node* node,
     return false;
   }
 
-  std::unordered_map<std::string, std::string> resolved;
-  std::unordered_set<std::string> read_only;
+  detersl::func::WasmFuncInfo func_info = it->second;
+
   std::unordered_map<std::string, nlohmann::json> value_inputs;
-  if (!detersl::utils::resolve_resources(node, invocation, resolved, &read_only, value_inputs, err)) {
+  std::unordered_map<std::string, nlohmann::json> resource_inputs;
+  if (!detersl::utils::resolve_resources(node, invocation, resource_inputs, func_info.resources, 
+    &func_info.read_only_resources, value_inputs, err, true)) {
     return false;
   }
-
-  std::vector<std::string> resources;
-
-  std::for_each(resolved.begin(), resolved.end(), 
-    [&resources](auto p){ resources.push_back(p.second);});
-
-  detersl::func::WasmFuncInfo func_info = it->second;
-  func_info.resources = std::move(resources);
-  func_info.read_only_resources = std::move(read_only);
-
+  
   nlohmann::json input_payload = nlohmann::json::object();
   input_payload["resources"] = nlohmann::json::object();
   input_payload["values"] = nlohmann::json::object();
-  for (const auto& item : resolved) {
+
+  for (const auto& item : resource_inputs) {
     input_payload["resources"][item.first] = item.second;
   }
   for (const auto& item : value_inputs) {
     input_payload["values"][item.first] = item.second;
   }
   func_info.func_input_event.data = input_payload.dump();
-
   schedule_function(std::move(func_info), invocation, guard);
   return true;
 }
@@ -156,19 +150,15 @@ bool Scheduling::schedule_choice_node(const Node* node,
 {  
   const bool can_abort = invocation.request.can_abort;
 
-  std::unordered_map<std::string, std::string> resolved;
   std::unordered_map<std::string, json> value_inputs;
-  if (!detersl::utils::resolve_resources(node, invocation, resolved, nullptr, value_inputs, err)) {
+  std::unordered_map<std::string, json> resource_inputs;
+  std::vector<std::string> resource_names;
+  if (!detersl::utils::resolve_resources(node, invocation, resource_inputs, resource_names, nullptr, value_inputs, err, false)) {
     return false;
   }
 
   std::unordered_map<std::string, cown_ptr<detersl::types::Resource>>& workflow_resources = invocation.workflow_resources;
   const std::shared_ptr<std::atomic<bool>>& failed = invocation.failed;
-
-  std::vector<std::string> resource_names;  
-
-  std::for_each(resolved.begin(), resolved.end(),
-    [&resource_names](auto p){ resource_names.push_back(p.second);});
 
   std::vector<cown_ptr<detersl::types::Resource>> resource_cowns;
 
@@ -191,7 +181,7 @@ bool Scheduling::schedule_choice_node(const Node* node,
     resource_cowns.size()
   };
   
-  auto eval_choice = [node, resolved = std::move(resolved), vals = std::move(value_inputs), res_names = std::move(resource_names), failed](auto local_resources, auto &cown) {
+  auto eval_choice = [node, resource_inputs = std::move(resource_inputs), vals = std::move(value_inputs), res_names = std::move(resource_names), failed](auto local_resources, auto &cown) {
     std::unordered_map<std::string, detersl::types::Resource*> resource_map;
 
     for (size_t i = 0; i < res_names.size(); ++i) { 
@@ -217,12 +207,19 @@ bool Scheduling::schedule_choice_node(const Node* node,
         }
       }
       else {
-        if (resource_map.find(resolved.at(edge.Variable)) == resource_map.end()) {
-          std::cerr << "choice: resource \"" << resolved.at(edge.Variable) << "\" not found\n";
+        auto res_it = resource_inputs.find(edge.Variable);
+        if (res_it == resource_inputs.end() || !res_it->second.is_string()) {
+          std::cerr << "choice: resource \"" << edge.Variable << "\" not found\n";
           failed->store(true, std::memory_order_release);
           continue;
         }
-        detersl::types::Resource* resource = resource_map.at(resolved.at(edge.Variable));
+        const std::string runtime_name = res_it->second.get<std::string>();
+        if (resource_map.find(runtime_name) == resource_map.end()) {
+          std::cerr << "choice: resource \"" << runtime_name << "\" not found\n";
+          failed->store(true, std::memory_order_release);
+          continue;
+        }
+        detersl::types::Resource* resource = resource_map.at(runtime_name);
         if (!cmpBytes(resource->get_data(), edge.Operand, edge.Value, &match)) {
           std::cerr << "choice: unsupported operand \"" << edge.Operand << "\"\n";
           cown->decided = true;
@@ -274,6 +271,7 @@ bool Scheduling::schedule_choice_node(const Node* node,
 void Scheduling::schedule_commit_behaviour(detersl::types::WorkflowInvocation& invocation) {
   std::shared_ptr<detersl::metrics::InvocationMetrics> metrics = invocation.metrics;
   const cown_ptr<detersl::types::Resource> invocation_cown = invocation.invocation_cown;
+  const std::shared_ptr<std::atomic<bool>>& failed = invocation.failed;
   if(!invocation.request.can_abort){
     when(invocation_cown) << [metrics](auto ic){
        metrics->complete();
@@ -282,9 +280,6 @@ void Scheduling::schedule_commit_behaviour(detersl::types::WorkflowInvocation& i
   }
 
   std::unordered_set<std::string>& workflow_rw_resources = invocation.workflow_rw_resources;
-  const std::shared_ptr<std::atomic<bool>>& failed = invocation.failed;
-
-
   std::unordered_map<std::string, int> local_ref_counts;
   std::vector<std::string> commit_resource_names;
 
@@ -446,42 +441,32 @@ bool Scheduling::register_workflow(const detersl::types::Workflow& workflow, std
   return true;
 }
 
-bool Scheduling::invoke_workflow(const detersl::types::InvokeDTO& invoke, std::string* err, std::string* request_id)
+bool Scheduling::invoke_workflow(const detersl::types::InvokeDTO& request, uint64_t& id, std::string* err)
 {
-  auto it = workflow_registry.find(invoke.WorkflowID);
+  auto it = workflow_registry.find(request.WorkflowID);
   if (it == workflow_registry.end()) {
-    if (err) *err = "unknown workflow id: " + invoke.WorkflowID;
+    if (err) *err = "unknown workflow id: " + request.WorkflowID;
     return false;
   }
-
-  std::string invocation_id = invoke.WorkflowID + ":" + std::to_string(next_workflow_request_id++);
-    
-  detersl::types::WorkflowRequest request{
-    .WorkflowID = invoke.WorkflowID,
-    .Input = invoke.Input,
-    .can_abort = invoke.can_abort,
-    .RequestID = invocation_id
-  };
   
   detersl::types::WorkflowInvocation invocation{
+    .invocation_id = id,
     .workflow_resources = {},
     .workflow_rw_resources = {},
     .invocation_cown = make_cown<detersl::types::Resource>(),
     .failed = std::make_shared<std::atomic<bool>>(false),
     .metrics = std::make_shared<detersl::metrics::InvocationMetrics>(
+        id,
         std::chrono::steady_clock::now(),
-        invocation.failed),
+        invocation.failed,
+        completion_cb_),
     .request = std::move(request)
   };
   
-  detersl::metrics::insert_invocation_metric(invocation_id, invocation.metrics);
+  //detersl::metrics::insert_invocation_metric(request.RequestID, invocation.metrics);
   
-  detersl::metrics::prune_completed_invocation_metrics();
+  // detersl::metrics::prune_completed_invocation_metrics();
   
-  if (request_id) {
-    *request_id = invocation_id;
-  }
-
   return schedule_graph(it->second, invocation, err);
 }
 
@@ -512,21 +497,6 @@ bool Scheduling::get_resource(const std::string &res_name, std::future<rust::Vec
     promise->set_value(r->get_data().as_vec());
   };
 
-  return true;
-}
-
-bool Scheduling::get_workflow_status(const std::string& request_id, detersl::types::WorkflowStatus* status) {
-  auto metrics = detersl::metrics::get_invocation_metrics(request_id);
-  if (!metrics) {
-    return false;
-  }
-
-  if (status) {
-    status->done = metrics->completed.load(std::memory_order_acquire);
-    status->failed = metrics->failed && metrics->failed->load(std::memory_order_acquire);
-    status->latency_ms = metrics->latency_ms.load(std::memory_order_acquire);
-    status->completed_at_ms = metrics->completed_at_ms.load(std::memory_order_acquire);
-  }
   return true;
 }
 

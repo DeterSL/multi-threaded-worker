@@ -75,10 +75,12 @@ bool parse_resource_placeholder(const std::string& placeholder,
 
 bool resolve_resources(const Node* node,
                               detersl::types::WorkflowInvocation& invocation,
-                              std::unordered_map<std::string, std::string>& resolved,
+                              std::unordered_map<std::string, nlohmann::json>& resource_inputs,
+                              std::vector<std::string>& resource_names,
                               std::unordered_set<std::string>* read_only,
                               std::unordered_map<std::string, nlohmann::json>& value_inputs,
-                              std::string* err) {
+                              std::string* err,
+                              bool allow_variadic) {
   if (!node) {
     if (err) *err = "missing task node";
     return false;
@@ -96,32 +98,94 @@ bool resolve_resources(const Node* node,
       continue;
     }
 
-    std::string runtime_name;
     if (cur.is_local) {
-      //local_resource
-      runtime_name = invocation.request.RequestID + ":" + cur.key;
+      if (!invocation_resources.contains(cur.key)) {
+        if (err) *err = "missing resource \"" + cur.key + "\" in invocation";
+        return false;
+      }
+      const nlohmann::json& input_val = invocation_resources.at(cur.key);
+      if (input_val.is_array()) {
+        if (!allow_variadic) {
+          if (err) *err = "resource \"" + cur.key + "\" must map to a string";
+          return false;
+        }
+        nlohmann::json runtime_vals = nlohmann::json::array();
+        for (const auto& entry : input_val) {
+          if (!entry.is_string()) {
+            if (err) *err = "resource \"" + cur.key + "\" array entries must be strings";
+            return false;
+          }
+          const std::string runtime_name =
+              std::to_string(invocation.invocation_id) + ":" + entry.get<std::string>();
+          if (workflow_resources.find(runtime_name) == workflow_resources.end()) {
+            workflow_resources[runtime_name] = make_cown<detersl::types::Resource>();
+          }
+          resource_names.push_back(runtime_name);
+          runtime_vals.push_back(runtime_name);
+          if (read_only && cur.read_only) {
+            read_only->insert(runtime_name);
+          }
+        }
+        resource_inputs[cur.local_name] = std::move(runtime_vals);
+        continue;
+      }
+      if (!input_val.is_string()) {
+        if (err) *err = "resource \"" + cur.key + "\" must map to a string or array of strings";
+        return false;
+      }
+      const std::string runtime_name =
+          std::to_string(invocation.invocation_id) + ":" + input_val.get<std::string>();
       if (workflow_resources.find(runtime_name) == workflow_resources.end()) {
         workflow_resources[runtime_name] = make_cown<detersl::types::Resource>();
       }
-      
-    } else {
+      resource_inputs[cur.local_name] = runtime_name;
+      resource_names.push_back(runtime_name);
+      if (read_only && cur.read_only) {
+        read_only->insert(runtime_name);
+      }
+      continue;
+    }
+
+    {
       //global resource
       if (!invocation_resources.contains(cur.key)) {
         if (err) *err = "missing resource \"" + cur.key + "\" in invocation";
         return false;
       }
-      if (!invocation_resources.at(cur.key).is_string()) {
-        if (err) *err = "resource \"" + cur.key + "\" must map to a string";
+
+      const nlohmann::json& input_val = invocation_resources.at(cur.key);
+      if (input_val.is_array()) {
+        if (!allow_variadic) {
+          if (err) *err = "resource \"" + cur.key + "\" must map to a string";
+          return false;
+        }
+        for (const auto& entry : input_val) {
+          if (!entry.is_string()) {
+            if (err) *err = "resource \"" + cur.key + "\" array entries must be strings";
+            return false;
+          }
+          const std::string runtime_name = entry.get<std::string>();
+          resource_names.push_back(runtime_name);
+          if (read_only && cur.read_only) {
+            read_only->insert(runtime_name);
+          }
+        }
+        resource_inputs[cur.local_name] = input_val;
+        continue;
+      }
+
+      if (!input_val.is_string()) {
+        if (err) *err = "resource \"" + cur.key + "\" must map to a string or array of strings";
         return false;
       }
-      runtime_name = invocation_resources.at(cur.key).get<std::string>();
-      
-    }
 
-    resolved[cur.local_name] = runtime_name;
-    if (read_only && cur.read_only) {
-      read_only->insert(runtime_name);
-    } 
+      const std::string runtime_name = input_val.get<std::string>();
+      resource_inputs[cur.local_name] = runtime_name;
+      resource_names.push_back(runtime_name);
+      if (read_only && cur.read_only) {
+        read_only->insert(runtime_name);
+      }
+    }
   }
   return true;
 }

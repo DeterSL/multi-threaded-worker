@@ -1,0 +1,24 @@
+services:
+  nats:
+    image: nats:2.11
+    command: ["-c", "/etc/nats/nats-server.conf"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+      - "6222:6222"
+    volumes:
+      - ./docker/nats-server.conf:/etc/nats/nats-server.conf:ro
+      - nats-jetstream:/data/jetstream
+
+  runtime:
+    build: .
+    depends_on:
+      - nats
+    environment:
+      - NATSURL=nats://nats:4222
+      - DETERSL_THREADS=${DETERSL_THREADS:-4}
+    ports:
+      - "8080:8080"
+
+volumes:
+  nats-jetstream:

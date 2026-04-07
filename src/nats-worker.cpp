@@ -1,0 +1,408 @@
+#include "nats-worker.hpp"
+
+#include "nats_raii.hpp"
+#include "scheduling.hpp"
+#include "metrics.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <cstdlib>
+#include <future>
+#include <iostream>
+#include <optional>
+#include <string>
+#include <thread>
+#include <unordered_set>
+#include <vector>
+
+#include <atomic_queue/atomic_queue.h>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
+
+namespace detersl::nats {
+
+constexpr int kResourceTimeoutMs = 3000;
+
+struct NatsConfig {
+  std::string url;
+  std::string subject;
+  std::string stream;
+  std::string durable;
+  int batch_size;
+  int fetch_timeout_ms;
+};
+
+std::string envOr(const char* k, const std::string& def) {
+  const char* v = std::getenv(k);
+  return (v && *v) ? std::string(v) : def;
+}
+
+int envOrInt(const char* k, int def) {
+  const char* v = std::getenv(k);
+  return (v && *v) ? std::atoi(v) : def;
+}
+
+void publish_reply(Connection& conn, const char* reply, const json& body) {
+  if (!reply || !*reply) {
+    return;
+  }
+  const std::string payload = body.dump();
+  try {
+    conn.publish(reply, payload.data(), payload.size());
+  } catch (const std::exception& e) {
+    std::cerr << "nats reply publish failed: " << e.what() << std::endl;
+  }
+}
+
+json error_resp(const std::string& msg) {
+  return json{{"status", "error"}, {"error", msg}};
+}
+
+struct Task {
+  enum class Kind { RegisterWasm, RegisterWorkflow, Status, GetResource, Invoke };
+  Kind kind;
+  json payload;
+  std::optional<uint64_t> id;
+  std::string reply;
+};
+
+void run_nats_worker(detersl::worker::Scheduling& scheduling) {
+  NatsConfig cfg{
+      .url = envOr("NATSURL", NATS_DEFAULT_URL),
+      .subject = envOr("SUBJECT", "detersl.worker"),
+      .stream = envOr("STREAM", "DETERSL"),
+      .durable = envOr("DURABLE", "detersl-mt-worker"),
+      .batch_size = std::max(1, envOrInt("BATCH_SIZE", 1000)),
+      .fetch_timeout_ms = std::max(1, envOrInt("FETCH_TIMEOUT_MS", 3)),
+  };
+
+  const std::string js_invoke = cfg.subject + ".invoke";
+  const std::string js_invoke_batch = cfg.subject + ".invoke_batch";
+  const std::string core_subject = envOr("CORE_SUBJECT", cfg.subject + ".core");
+  const std::string core_prefix = core_subject + ".";
+  const std::string core_wildcard = core_subject + ".*";
+  const std::string metrics_subject = envOr("METRICS_SUBJECT", cfg.subject + ".metrics");
+  const std::string metrics_stream = envOr("METRICS_STREAM", cfg.stream + "_METRICS");
+  const int metrics_batch_max = envOrInt("METRICS_BATCH_MAX", 256);
+  const int metrics_flush_ms = envOrInt("METRICS_FLUSH_MS", 15);
+
+  std::cout << "NATS worker config: url=" << cfg.url
+            << " subj=" << cfg.subject
+            << " stream=" << cfg.stream
+            << " durable=" << cfg.durable
+            << " batch=" << cfg.batch_size
+            << " fetch_timeout_ms=" << cfg.fetch_timeout_ms << std::endl;
+
+  std::cout << "NATS worker JetStream subjects: " << js_invoke << ", " << js_invoke_batch << std::endl;
+  std::cout << "NATS worker core subjects: " << core_wildcard << std::endl;
+  std::cout << "NATS worker metrics subject: " << metrics_subject
+            << " metrics stream=" << metrics_stream
+            << " batch=" << metrics_batch_max
+            << " flush_ms=" << metrics_flush_ms << std::endl;
+
+  Connection conn(cfg.url, "DeterSL Multi-Threaded Worker", 10000, 10, 1000);
+
+  StreamManager::ensureStream(conn.jetstream(),
+                              cfg.stream,
+                              {js_invoke, js_invoke_batch},
+                              true);
+  StreamManager::ensureStream(conn.jetstream(),
+                              metrics_stream,
+                              {metrics_subject},
+                              true);
+
+  const unsigned control_queue_capacity = static_cast<unsigned>(
+      std::max(1, envOrInt("CONTROL_QUEUE_CAPACITY", 1024)));
+  const unsigned invoke_queue_capacity = static_cast<unsigned>(
+      std::max(cfg.batch_size, envOrInt("INVOKE_QUEUE_CAPACITY", cfg.batch_size * 8)));
+  constexpr unsigned kMetricsQueueCapacity = 100000;
+  atomic_queue::AtomicQueueB2<Task> control_queue(control_queue_capacity);
+  atomic_queue::AtomicQueueB2<Task> invoke_queue(invoke_queue_capacity);
+  atomic_queue::AtomicQueueB2<detersl::types::MetricEvent> metrics_queue(kMetricsQueueCapacity);
+
+  std::cout << "NATS worker queue capacity: control=" << control_queue_capacity
+            << " invoke=" << invoke_queue_capacity
+            << " metrics=" << kMetricsQueueCapacity << std::endl;
+
+  auto enqueue_task = [](auto& queue, Task&& task) {
+    while (!queue.try_push(task)) {
+      std::cout << "task queue full" << std::endl;
+      std::this_thread::yield();
+    }
+  };
+
+  auto enqueue_metric = [&](detersl::types::MetricEvent&& ev) {
+    while (!metrics_queue.try_push(ev)) {
+      std::cout << "metrics queue full, dropping metric event" << std::endl;
+      std::this_thread::yield();
+    }
+  };
+
+  const int delete_after_n_wf = 100;
+  int wf_count = 0;
+
+  scheduling.set_completion_callback(
+      [&](const uint64_t& request_id,
+          bool failed,
+          int64_t latency_ms,
+          int64_t completed_at_ms) {
+        enqueue_metric(detersl::types::MetricEvent{request_id, failed, latency_ms, completed_at_ms});
+      });
+
+  auto handle_control_task = [&](const Task& task) {
+    json response;
+
+    try {
+      switch (task.kind) {
+        case Task::Kind::RegisterWasm: {
+          std::string err;
+          if (scheduling.register_wasm_function(task.payload, &err)) {
+            response = json{{"status", "ok"}};
+          } else {
+            response = error_resp(err);
+          }
+          publish_reply(conn, task.reply.c_str(), response);
+          break;
+        }
+        case Task::Kind::RegisterWorkflow: {
+          std::string err;
+          detersl::types::Workflow workflow = task.payload.get<detersl::types::Workflow>();
+          if (scheduling.register_workflow(workflow, &err)) {
+            response = json{{"status", "ok"}};
+          } else {
+            response = error_resp(err);
+          }
+          publish_reply(conn, task.reply.c_str(), response);
+          break;
+        }
+        case Task::Kind::Status: {
+          break;
+        }
+        case Task::Kind::GetResource: {
+          auto publish_bytes = [&conn, rep = task.reply](const void* data, size_t len) {
+            try {
+              conn.publish(rep.c_str(), data, len);
+            } catch (const std::exception& e) {
+              std::cerr << "nats reply publish failed: " << e.what() << std::endl;
+            }
+          };
+
+          std::string res_name;
+          if (task.payload.is_string()) {
+            res_name = task.payload.get<std::string>();
+          } else if (task.payload.contains("res_name")) {
+            res_name = task.payload.at("res_name").get<std::string>();
+          } else {
+            publish_bytes(nullptr, 0);
+            break;
+          }
+
+          std::future<rust::Vec<uint8_t>> res_data;
+          bool found = scheduling.get_resource(res_name, res_data);
+          if (!found) {
+            publish_bytes(nullptr, 0);
+          } else {
+            const auto status = res_data.wait_for(std::chrono::milliseconds(kResourceTimeoutMs));
+            if (status == std::future_status::timeout) {
+              publish_bytes(nullptr, 0);
+            } else {
+              rust::Vec<uint8_t> data_vec = res_data.get();
+              publish_bytes(data_vec.data(), data_vec.size());
+            }
+          }
+          break;
+        }
+        case Task::Kind::Invoke:
+          break;
+      }
+    } catch (const std::exception& e) {
+      response = error_resp(std::string("handler error: ") + e.what());
+      publish_reply(conn, task.reply.c_str(), response);
+    }
+  };
+
+  std::thread metrics_thread([&]() {
+    while (true) {
+      detersl::types::MetricEvent ev;
+
+      if (!metrics_queue.try_pop(ev)) {
+        std::this_thread::yield();
+        continue;
+      }
+
+      json obj = {
+        {"request_id", ev.request_id},
+        {"failed", ev.failed},
+        {"latency_ms", ev.latency_ms},
+        {"completed_at", ev.completed_at},
+      };
+
+      const std::string bytes = obj.dump();
+      natsStatus s = js_PublishAsync(conn.jetstream(),
+                                     metrics_subject.c_str(),
+                                     bytes.data(),
+                                     static_cast<int>(bytes.size()),
+                                     nullptr);
+      if (s != NATS_OK) {
+        std::cerr << "metrics js publish failed: " << natsStatus_GetText(s) << std::endl;
+      }
+    }
+  });
+
+  std::thread core_thread([&]() {
+    natsSubscription* core_sub = nullptr;
+    natsConnection* nc = conn.handle();
+    if (natsConnection_SubscribeSync(&core_sub, nc, core_wildcard.c_str()) != NATS_OK) {
+      std::cerr << "nats core subscribe error" << std::endl;
+      return;
+    }
+
+    while (true) {
+      natsMsg* msg = nullptr;
+      natsStatus s = natsSubscription_NextMsg(&msg, core_sub, 100);
+      if (s == NATS_TIMEOUT) {
+        continue;
+      }
+      if (s != NATS_OK) {
+        std::cerr << "nats core subscription error: " << natsStatus_GetText(s) << std::endl;
+        continue;
+      }
+
+      json response;
+      try {
+        const char* subject = natsMsg_GetSubject(msg);
+        const std::string subj = subject ? subject : "";
+        if (subj.rfind(core_prefix, 0) != 0) {
+          response = error_resp("unexpected subject: " + subj);
+          publish_reply(conn, natsMsg_GetReply(msg), response);
+          natsMsg_Destroy(msg);
+          continue;
+        }
+
+        const std::string op = subj.substr(core_prefix.size());
+        const char* data = natsMsg_GetData(msg);
+        const int len = natsMsg_GetDataLength(msg);
+        if (!data || len <= 0) {
+          response = error_resp("empty message");
+          publish_reply(conn, natsMsg_GetReply(msg), response);
+          natsMsg_Destroy(msg);
+          continue;
+        }
+
+        json parsed = nlohmann::json::parse(data, data + len);
+        json payload = parsed.contains("payload") ? parsed.at("payload") : parsed;
+
+        Task task{Task::Kind::Invoke, payload, std::nullopt, {}};
+        task.reply = natsMsg_GetReply(msg) ? natsMsg_GetReply(msg) : "";
+
+        if (op == "register_wasm") {
+          task.kind = Task::Kind::RegisterWasm;
+        } else if (op == "register_workflow") {
+          task.kind = Task::Kind::RegisterWorkflow;
+        } else if (op == "status") {
+          task.kind = Task::Kind::Status;
+        } else if (op == "get_resource") {
+          task.kind = Task::Kind::GetResource;
+        } else {
+          response = error_resp("unsupported op: " + op);
+          publish_reply(conn, natsMsg_GetReply(msg), response);
+          natsMsg_Destroy(msg);
+          continue;
+        }
+
+        enqueue_task(control_queue, std::move(task));
+      } catch (const std::exception& e) {
+        response = error_resp(std::string("handler error: ") + e.what());
+        publish_reply(conn, natsMsg_GetReply(msg), response);
+      }
+
+      natsMsg_Destroy(msg);
+    }
+  });
+
+  std::thread invoke_thread([&]() {
+    while (true) {
+      try {
+        Connection invoke_conn(cfg.url, "DeterSL JS Puller", 10000, 10, 1000);
+        PullSubscriber invoke_sub(invoke_conn.jetstream(), js_invoke, cfg.stream, cfg.durable + "-invoke");
+
+        while (true) {
+          std::vector<Msg> js_msgs;
+          try {
+            js_msgs = invoke_sub.fetch(cfg.batch_size, cfg.fetch_timeout_ms);
+          } catch (const std::exception& e) {
+            std::cerr << "nats js fetch error: " << e.what() << std::endl;
+            continue;
+          }
+
+          for (auto& msg : js_msgs) {
+            try {
+              jsMsgMetaData* meta = nullptr;
+              if (natsMsg_GetMetaData(&meta, msg.m) != NATS_OK) {
+                std::cerr << "invoke metadata error" << std::endl;
+                msg.ack(invoke_sub.jsOptionsPtr());
+                continue;
+              }
+
+              uint64_t seq = meta->Sequence.Stream;
+              jsMsgMetaData_Destroy(meta);
+
+              const char* data = msg.data();
+              const size_t len = msg.size();
+              if (!data || len == 0) {
+                std::cerr << "invoke message empty" << std::endl;
+                msg.ack(invoke_sub.jsOptionsPtr());
+                continue;
+              }
+
+              json parsed = nlohmann::json::parse(data, data + len);
+              Task task{Task::Kind::Invoke, parsed, seq, {}};
+              enqueue_task(invoke_queue, std::move(task));
+              msg.ack(invoke_sub.jsOptionsPtr());
+            } catch (const std::exception& e) {
+              std::cerr << "invoke handler error: " << e.what() << std::endl;
+              msg.ack(invoke_sub.jsOptionsPtr());
+            }
+          }
+        }
+      } catch (const std::exception& e) {
+        std::cerr << "invoke thread setup error: " << e.what() << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+      }
+    }
+  });
+
+  while (true) {
+    Task task;
+    if (invoke_queue.try_pop(task)) {
+      try {
+        std::string err;
+        detersl::types::InvokeDTO request = task.payload.get<detersl::types::InvokeDTO>();
+
+        if (wf_count >= delete_after_n_wf) {
+          wf_count = 0;
+          scheduling.cleanup_resources();
+        }
+
+        if (scheduling.invoke_workflow(request, *task.id, &err)) {
+          wf_count++;
+        } else {
+          std::cerr << "invoke failed: " << err << std::endl;
+        }
+      } catch (const std::exception& e) {
+        std::cerr << "invoke handler error: " << e.what() << std::endl;
+      }
+      continue;
+    }
+
+    if (control_queue.try_pop(task)) {
+      handle_control_task(task);
+      continue;
+    }
+
+    std::this_thread::yield();
+  }
+}
+
+} // namespace detersl::nats

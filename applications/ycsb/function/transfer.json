@@ -1,10 +1,11 @@
 {
   "func_name": "transfer",
   "func_invocation_id": "00000000-0000-0000-0000-000000000001",
+  "fast_execution" : true,
   "func_binary_hash": "2dd3722f66c6b298749db0fb0c103977",
   "func_binary_source": {
     "type": "fs",
-    "path": "/Users/alex/Desktop/DeterSL/applications/ycsb/function/transfer.wasm"
+    "path": "/app/applications/ycsb/function/transfer.wasm"
   },
   "func_input_event": {
     "type": "data",

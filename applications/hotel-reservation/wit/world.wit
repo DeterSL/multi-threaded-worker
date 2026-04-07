@@ -1,0 +1,8 @@
+package detersl:api@0.2.0; 
+
+world detersl-api {
+    export func-handler; 
+    include detersl:kv-api/kv-api@0.2.0;
+    include detersl:http-api/http-api@0.2.0;
+    include wasi:io/imports@0.2.6;
+}
