@@ -12,6 +12,7 @@ Workloads:
 
 Environment:
   PYTHON_BIN=python3                           Python used for clients
+  DETERSL_STOP_MODE=stop|down                  default: down; stop preserves container filesystem cache
 EOF
 }
 

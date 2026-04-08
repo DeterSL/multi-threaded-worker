@@ -14,6 +14,7 @@ Environment:
   GENERATE_CONFIG=true|false       default: true
   INCLUDE_EXISTING=true|false      default: false, passed to create_config.py
   CONTINUE_ON_FAILURE=true|false   default: false
+  DETERSL_STOP_MODE=stop|down       default: stop, keeps runtime container filesystem cache between runs
 EOF
 }
 
@@ -46,11 +47,13 @@ mkdir -p "$saving_dir"
 generate_config="${GENERATE_CONFIG:-true}"
 include_existing="${INCLUDE_EXISTING:-false}"
 continue_on_failure="${CONTINUE_ON_FAILURE:-false}"
+stop_mode="${DETERSL_STOP_MODE:-stop}"
 
 echo "docker compose file: $repo_root/docker-compose.yml"
 echo "saving_dir: $saving_dir"
 echo "runtime_threads: $runtime_threads"
 echo "scenarios: $scenarios"
+echo "stop_mode: $stop_mode"
 
 if [[ "$generate_config" == "true" ]]; then
   scenario_args_string="${scenarios//,/ }"
@@ -79,11 +82,14 @@ if [[ ! -s "$input" ]]; then
   exit 0
 fi
 
+ran_experiment=false
+
 while IFS= read -r line || [[ -n "$line" ]]; do
   [[ -z "$line" ]] && continue
   [[ "$line" == \#* ]] && continue
 
   printf 'Run DeterSL experiment: %s\n' "$line"
+  ran_experiment=true
   IFS=',' read -r \
     workload_name \
     input_rate \
@@ -98,7 +104,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     use_composite_keys \
     use_fallback_cache <<< "$line"
 
-  if ! "$script_dir/run_experiment.sh" \
+  if ! DETERSL_STOP_MODE="$stop_mode" "$script_dir/run_experiment.sh" \
       "$workload_name" \
       "$input_rate" \
       "$row_n_keys" \
@@ -120,3 +126,10 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     exit 1
   fi
 done < "$input"
+
+if [[ "$ran_experiment" == "true" ]]; then
+  echo "All experiments finished; removing DeterSL containers"
+  DETERSL_STOP_MODE=down "$script_dir/stop_detersl_cluster.sh" "$runtime_threads"
+else
+  echo "No experiments to run from $input"
+fi

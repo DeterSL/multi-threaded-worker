@@ -115,7 +115,7 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
   const unsigned control_queue_capacity = static_cast<unsigned>(
       std::max(1, envOrInt("CONTROL_QUEUE_CAPACITY", 1024)));
   const unsigned invoke_queue_capacity = static_cast<unsigned>(
-      std::max(cfg.batch_size, envOrInt("INVOKE_QUEUE_CAPACITY", cfg.batch_size * 8)));
+      std::max(cfg.batch_size, envOrInt("INVOKE_QUEUE_CAPACITY", cfg.batch_size * 100)));
   constexpr unsigned kMetricsQueueCapacity = 100000;
   atomic_queue::AtomicQueueB2<Task> control_queue(control_queue_capacity);
   atomic_queue::AtomicQueueB2<Task> invoke_queue(invoke_queue_capacity);
@@ -127,15 +127,15 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
 
   auto enqueue_task = [](auto& queue, Task&& task) {
     while (!queue.try_push(task)) {
-      std::cout << "task queue full" << std::endl;
-      std::this_thread::yield();
+      // std::cout << "task queue full" << std::endl;
+      // std::this_thread::yield();
     }
   };
 
   auto enqueue_metric = [&](detersl::types::MetricEvent&& ev) {
     while (!metrics_queue.try_push(ev)) {
-      std::cout << "metrics queue full, dropping metric event" << std::endl;
-      std::this_thread::yield();
+      // std::cout << "metrics queue full, dropping metric event" << std::endl;
+      // std::this_thread::yield();
     }
   };
 
@@ -145,9 +145,8 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
   scheduling.set_completion_callback(
       [&](const uint64_t& request_id,
           bool failed,
-          int64_t latency_ms,
           int64_t completed_at_ms) {
-        enqueue_metric(detersl::types::MetricEvent{request_id, failed, latency_ms, completed_at_ms});
+        enqueue_metric(detersl::types::MetricEvent{request_id, failed, completed_at_ms});
       });
 
   auto handle_control_task = [&](const Task& task) {
@@ -227,14 +226,13 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
       detersl::types::MetricEvent ev;
 
       if (!metrics_queue.try_pop(ev)) {
-        std::this_thread::yield();
+        // std::this_thread::yield();
         continue;
       }
 
       json obj = {
         {"request_id", ev.request_id},
         {"failed", ev.failed},
-        {"latency_ms", ev.latency_ms},
         {"completed_at", ev.completed_at},
       };
 
@@ -401,7 +399,7 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
       continue;
     }
 
-    std::this_thread::yield();
+    //std::this_thread::yield();
   }
 }
 

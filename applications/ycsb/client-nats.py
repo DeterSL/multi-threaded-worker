@@ -47,6 +47,9 @@ metrics_pull_timeout_s = 0.1
 
 metrics_by_id: dict[int, dict] = {}
 metrics_events: dict[int, asyncio.Event] = {}
+
+def epoch_ms() -> int:
+    return time.time_ns() // 1_000_000
         
 async def start_metrics_sub(js):
     sub = await js.pull_subscribe("detersl.worker.metrics", durable="detersl-metrics")
@@ -234,12 +237,16 @@ async def benchmark_runner(thread_num) -> dict[str, dict]:
             if i % step == 0:
                 await asyncio.sleep(sleep_time)
             wf_id, key1, key2 = next(ycsb_generator)
+            started_at_ms = epoch_ms()
             resp = await js.publish_async("detersl.worker.invoke",
                                            json.dumps({
                 "workflow_id" : wf_id,
                 "input" : {"from" : key1, "to" : key2}
             }).encode())
-            meta = {"op": f"{wf_id} {key1}->{key2}"}
+            meta = {
+                "op": f"{wf_id} {key1}->{key2}",
+                "started_at_ms": started_at_ms,
+            }
             #timestamp_futures[resp] = {"op": f"{wf_id} {key1}->{key2}"}
             tasks.append(asyncio.create_task(ack_with_meta(resp, meta)))
 
@@ -361,8 +368,9 @@ async def main():
 
     for key in tqdm(results.keys()):
         resp = await wait_for_wf(key)
-        results[key]["latency_ms"] = resp["latency_ms"]
-        results[key]["completed_at_ms"] = resp["completed_at"]
+        completed_at_ms = resp["completed_at"]
+        results[key]["completed_at_ms"] = completed_at_ms
+        results[key]["latency_ms"] = completed_at_ms - results[key]["started_at_ms"]
 
     # if run_with_validation:
     #     records = []

@@ -98,7 +98,6 @@ namespace detersl {
         struct MetricEvent {
             uint64_t request_id;
             bool failed{false};
-            int64_t latency_ms{-1};
             int64_t completed_at{-1};
         };
 
@@ -191,14 +190,12 @@ namespace detersl {
             j = json::object();
             j["request_id"]   = v.request_id;
             j["failed"]      = v.failed;
-            j["latency_ms"] = v.latency_ms;
             j["completed_at"]   = v.completed_at;
         }
 
         inline void from_json(const json& j, MetricEvent& v) {
             v.request_id  = j.at("request_id").get<uint64_t>();
             v.failed     = j.at("failed").get<bool>();
-            v.latency_ms = j.at("latency_ms").get<int64_t>();
             v.completed_at = j.at("completed_at").get<int64_t>();
         }
     }

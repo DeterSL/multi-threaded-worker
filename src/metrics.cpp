@@ -4,14 +4,12 @@
 
 namespace detersl::metrics{
   
-InvocationMetrics::InvocationMetrics(uint64_t invocation_id_, std::chrono::steady_clock::time_point submitted_at_, 
+InvocationMetrics::InvocationMetrics(uint64_t invocation_id_,
           std::shared_ptr<std::atomic<bool>> failed_,
           std::function<void(const uint64_t& request_id,
                              bool failed,
-                             int64_t latency_ms,
                              int64_t completed_at_ms)> on_complete_): 
           invocation_id(invocation_id_),
-          submitted_at(submitted_at_),
           failed(failed_),
           on_complete(std::move(on_complete_)) {}
 
@@ -22,16 +20,13 @@ void InvocationMetrics::complete(){
           std::chrono::system_clock::now()
       ).time_since_epoch().count();
       completed_at_ms.store(static_cast<int64_t>(completed_at), std::memory_order_release);
-      const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - submitted_at
-      ).count();
-      latency_ms.store(static_cast<int64_t>(elapsed), std::memory_order_release);
   }
-  on_complete(
-    invocation_id,
-    failed->load(std::memory_order_acquire),
-    latency_ms.load(std::memory_order_acquire),
-    completed_at_ms.load(std::memory_order_acquire));
+  if (on_complete) {
+    on_complete(
+      invocation_id,
+      failed->load(std::memory_order_acquire),
+      completed_at_ms.load(std::memory_order_acquire));
+  }
 }
 
 // std::mutex metrics_mutex;

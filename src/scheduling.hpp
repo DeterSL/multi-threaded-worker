@@ -39,7 +39,6 @@ class Scheduling {
     public:
         using CompletionCallback = std::function<void(const uint64_t& request_id,
                                                      bool failed,
-                                                     int64_t latency_ms,
                                                      int64_t completed_at_ms)>;
 
         void set_completion_callback(CompletionCallback cb) { completion_cb_ = std::move(cb); }

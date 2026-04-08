@@ -1,6 +1,9 @@
 #include "scheduling.hpp"
 #include "metrics.hpp"
 
+#include <chrono>
+#include <iostream>
+
 using json = nlohmann::json;
 
 namespace detersl::worker {
@@ -18,13 +21,14 @@ void Scheduling::schedule_function(detersl::func::WasmFuncInfo&& func_info,
   std::unordered_map<std::string, int> local_ref_counts;
 
   for(auto & res_name : func_info.resources){
-    if(invocation.workflow_resources.find(res_name) != invocation.workflow_resources.end()){
+    auto workflow_it = invocation.workflow_resources.find(res_name);
+    if(workflow_it != invocation.workflow_resources.end()){
       // Resource is a workflow-scoped resource
       if(func_info.read_only_resources.find(res_name) != func_info.read_only_resources.end()){
-        read_only_resources.push_back(invocation.workflow_resources[res_name]);
+        read_only_resources.push_back(workflow_it->second);
       }
       else{
-        read_write_resources.push_back(invocation.workflow_resources[res_name]);
+        read_write_resources.push_back(workflow_it->second);
       }
       continue;
     }
@@ -122,8 +126,8 @@ bool Scheduling::run_task_node(Node* node,
 
   std::unordered_map<std::string, nlohmann::json> value_inputs;
   std::unordered_map<std::string, nlohmann::json> resource_inputs;
-  if (!detersl::utils::resolve_resources(node, invocation, resource_inputs, func_info.resources, 
-    &func_info.read_only_resources, value_inputs, err, true)) {
+  if (!detersl::utils::resolve_resources(node, invocation, resource_inputs, func_info.resources,
+                                         &func_info.read_only_resources, value_inputs, err, true)) {
     return false;
   }
   
@@ -457,7 +461,6 @@ bool Scheduling::invoke_workflow(const detersl::types::InvokeDTO& request, uint6
     .failed = std::make_shared<std::atomic<bool>>(false),
     .metrics = std::make_shared<detersl::metrics::InvocationMetrics>(
         id,
-        std::chrono::steady_clock::now(),
         invocation.failed,
         completion_cb_),
     .request = std::move(request)

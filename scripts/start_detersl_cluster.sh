@@ -11,4 +11,4 @@ echo "compose_file: $repo_root/docker-compose.yml"
 echo "build: false"
 echo "===================================================="
 
-DETERSL_THREADS="$runtime_threads" "${compose_cmd[@]}" up -d --no-build
+DETERSL_THREADS="$runtime_threads" "${compose_cmd[@]}" up -d
