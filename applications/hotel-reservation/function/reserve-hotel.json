@@ -5,7 +5,7 @@
   "func_binary_hash": "2dd3722f6f6c6b298749db0fb0c106977",
   "func_binary_source": {
     "type": "fs",
-    "path": "/app/applications/hotel-reservation/function/reserve-hotel.wasm"
+    "path": "/Users/alex/Desktop/DeterSL/multi-threaded-worker/applications/hotel-reservation/function/reserve-hotel.wasm"
   },
   "func_input_event": {
     "type": "data",

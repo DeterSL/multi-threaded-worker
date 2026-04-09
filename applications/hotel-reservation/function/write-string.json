@@ -5,7 +5,7 @@
   "func_binary_hash": "2dd3722f66c6b298749db0fab0c106977",
   "func_binary_source": {
     "type": "fs",
-    "path": "/app/applications/hotel-reservation/function/write-string.wasm"
+    "path": "/Users/alex/Desktop/DeterSL/multi-threaded-worker/applications/hotel-reservation/function/write-string.wasm"
   },
   "func_input_event": {
     "type": "data",

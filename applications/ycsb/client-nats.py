@@ -4,6 +4,7 @@ import csv
 import datetime as dt
 import http.client
 import json
+import os
 import random
 import re
 import statistics
@@ -13,7 +14,8 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExecutor
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from nats.errors import NoRespondersError, TimeoutError
+from typing import Iterable
 from urllib.parse import urlsplit
 from zipfian_generator import ZipfGenerator
 from timeit import default_timer as timer
@@ -44,9 +46,15 @@ poll_sleep = 0.001
 batch_size = 5000
 metrics_pull_batch = 1000
 metrics_pull_timeout_s = 0.1
+metrics_collect_timeout_s = 600
 
 metrics_by_id: dict[int, dict] = {}
 metrics_events: dict[int, asyncio.Event] = {}
+metrics_batch_waiters: list[tuple[set[int], asyncio.Event]] = []
+
+REGISTRATION_TIMEOUT_S = float(os.environ.get("REGISTRATION_TIMEOUT_S", "20"))
+REGISTRATION_MAX_RETRIES = max(1, int(os.environ.get("REGISTRATION_MAX_RETRIES", "5")))
+REGISTRATION_RETRY_BACKOFF_S = float(os.environ.get("REGISTRATION_RETRY_BACKOFF_S", "1"))
 
 def epoch_ms() -> int:
     return time.time_ns() // 1_000_000
@@ -68,13 +76,54 @@ async def start_metrics_sub(js):
                     evt = metrics_events.get(req_id)
                     if evt:
                         evt.set()
+                    for pending, batch_evt in metrics_batch_waiters:
+                        pending.discard(req_id)
+                        if not pending:
+                            batch_evt.set()
                 finally:
                     await msg.ack()
         
     asyncio.create_task(pull_loop())
+    
 
 def utc_now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+
+async def request_with_retries(nc, subject: str, payload: dict, label: str):
+    encoded = json.dumps(payload).encode("utf-8")
+
+    for attempt in range(1, REGISTRATION_MAX_RETRIES + 1):
+        try:
+            response = await nc.request(subject, encoded, timeout=REGISTRATION_TIMEOUT_S)
+            raw_response = response.data.decode(errors="replace")
+            try:
+                body = json.loads(raw_response)
+            except json.JSONDecodeError:
+                body = None
+
+            if isinstance(body, dict) and body.get("status") == "error":
+                error = str(body.get("error", raw_response))
+                if "already registered" in error:
+                    print(f"{label} already registered: {error}")
+                    return response
+                raise RuntimeError(f"{label} registration failed: {error}")
+
+            print(f"{label} registered: {raw_response or '<empty response>'}")
+            return response
+        except (NoRespondersError, TimeoutError) as exc:
+            failure = "had no responders" if isinstance(exc, NoRespondersError) else "timed out"
+            if attempt == REGISTRATION_MAX_RETRIES:
+                raise RuntimeError(
+                    f"{label} {failure} after {REGISTRATION_MAX_RETRIES} attempts "
+                    f"with a {REGISTRATION_TIMEOUT_S:g}s timeout"
+                ) from exc
+
+            delay = REGISTRATION_RETRY_BACKOFF_S * attempt
+            print(
+                f"{label} registration {failure} "
+                f"(attempt {attempt}/{REGISTRATION_MAX_RETRIES}); retrying in {delay:g}s"
+            )
+            await asyncio.sleep(delay)
 
 async def message_handler(msg):
     subject = msg.subject
@@ -84,21 +133,23 @@ async def message_handler(msg):
         subject=subject, reply=reply, data=data))
 
 async def register_workflow(nc, payload : dict):
-    try:
-        response = await nc.request("detersl.worker.core.register_workflow", json.dumps(payload).encode("utf-8") , timeout=10)
-        print(response)
-    except TimeoutError:
-        print("Request timed out")
+    await request_with_retries(
+        nc,
+        "detersl.worker.core.register_workflow",
+        payload,
+        f"workflow {payload.get('id', '<unknown>')}",
+    )
 
 async def register_function(nc, func_name : str):
     with open(f'function/{func_name}.json') as file:
         func_reg = json.load(file)
 
-    try:
-        response = await nc.request("detersl.worker.core.register_wasm", json.dumps(func_reg).encode("utf-8") , timeout=10)
-        print(response)
-    except TimeoutError:
-        print("Request timed out")
+    await request_with_retries(
+        nc,
+        "detersl.worker.core.register_wasm",
+        func_reg,
+        f"function {func_name}",
+    )
 
     # print(response)
 
@@ -134,14 +185,33 @@ async def invoke_workflow_async(js, payload):
         json.dumps(payload).encode()
     )
 
-# def invoke_workflow_batch(payloads: list[dict]) -> HttpResult:
-#     return http_call_json(
-#                 base_url= DETERSL_SERVER,
-#                 path="/workflow/invoke_batch",
-#                 method="POST",
-#                 timeout_s= DEFAULT_TIMEOUT,
-#                 payload=payloads,
-#                 )
+async def wait_for_wfs(req_ids: Iterable[int], timeout=metrics_collect_timeout_s):
+    req_ids = list(req_ids)
+    if not req_ids:
+        return {}
+
+    pending = {req_id for req_id in req_ids if req_id not in metrics_by_id}
+    if pending:
+        evt = asyncio.Event()
+        waiter = (pending, evt)
+        metrics_batch_waiters.append(waiter)
+        try:
+            await asyncio.wait_for(evt.wait(), timeout=timeout)
+        except asyncio.TimeoutError as exc:
+            missing = list(pending)
+            sample = ", ".join(str(req_id) for req_id in missing[:10])
+            raise RuntimeError(
+                f"Timed out after {timeout}s waiting for "
+                f"{len(missing)}/{len(req_ids)} workflow completions"
+                + (f"; first missing request_ids: {sample}" if sample else "")
+            ) from exc
+        finally:
+            for idx, current in enumerate(metrics_batch_waiters):
+                if current is waiter:
+                    del metrics_batch_waiters[idx]
+                    break
+
+    return {req_id: metrics_by_id[req_id] for req_id in req_ids}
 
 async def ycsb_init(keys: list[int]):
     nc = await nats.connect("nats://localhost:4222")
@@ -196,8 +266,7 @@ async def ycsb_init(keys: list[int]):
         ack = await fut
         req_ids.append(ack.seq)
 
-    for key in tqdm(req_ids):
-        await wait_for_wf(key)
+    await wait_for_wfs(req_ids)
         
 def transactional_ycsb_generator(keys,
                                  n: int,
@@ -237,7 +306,6 @@ async def benchmark_runner(thread_num) -> dict[str, dict]:
             if i % step == 0:
                 await asyncio.sleep(sleep_time)
             wf_id, key1, key2 = next(ycsb_generator)
-            started_at_ms = epoch_ms()
             resp = await js.publish_async("detersl.worker.invoke",
                                            json.dumps({
                 "workflow_id" : wf_id,
@@ -245,7 +313,7 @@ async def benchmark_runner(thread_num) -> dict[str, dict]:
             }).encode())
             meta = {
                 "op": f"{wf_id} {key1}->{key2}",
-                "started_at_ms": started_at_ms,
+                "started_at_ms": epoch_ms(),
             }
             #timestamp_futures[resp] = {"op": f"{wf_id} {key1}->{key2}"}
             tasks.append(asyncio.create_task(ack_with_meta(resp, meta)))
@@ -253,7 +321,7 @@ async def benchmark_runner(thread_num) -> dict[str, dict]:
         sec_end = timer()
         lps = sec_end - sec_start
         if lps < 1:
-            time.sleep(1 - lps)
+            await asyncio.sleep(1 - lps)
         sec_end2 = timer()
         print(f"{second} | Latency per second: {sec_end2 - sec_start}")
 
@@ -366,8 +434,8 @@ async def main():
 
     results = {k: v for d in results for k, v in d.items()}
 
-    for key in tqdm(results.keys()):
-        resp = await wait_for_wf(key)
+    workflow_metrics = await wait_for_wfs(results.keys())
+    for key, resp in tqdm(workflow_metrics.items()):
         completed_at_ms = resp["completed_at"]
         results[key]["completed_at_ms"] = completed_at_ms
         results[key]["latency_ms"] = completed_at_ms - results[key]["started_at_ms"]

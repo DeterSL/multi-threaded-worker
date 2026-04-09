@@ -70,7 +70,7 @@ metrics_events: dict[int, asyncio.Event] = {}
 metrics_batch_waiters: list[tuple[set[int], asyncio.Event]] = []
 
 def epoch_ms() -> int:
-    return time.time_ns() // 1_000_000
+    return int(time.time() * 1000)
 
 ####################################################################################################################
 async def start_metrics_sub(js):
@@ -531,7 +531,6 @@ async def benchmark_runner(thread_num) -> dict[str, dict]:
             if i % step == 0:
                 await asyncio.sleep(sleep_time)
             wf_id, wf_input = next(deathstar_generator)
-            started_at_ms = epoch_ms()
             resp = await js.publish_async("detersl.worker.invoke",
                     json.dumps({
                 "workflow_id" : wf_id,
@@ -539,7 +538,7 @@ async def benchmark_runner(thread_num) -> dict[str, dict]:
             }).encode())
             meta = {
                 "op": f"{wf_id} : {wf_input}",
-                "started_at_ms": started_at_ms,
+                "started_at_ms": epoch_ms(),
             }
             # timestamp_futures[resp] = {"op": f"{wf_id} {key1}->{key2}"}
             tasks.append(asyncio.create_task(ack_with_meta(resp, meta)))
@@ -547,7 +546,7 @@ async def benchmark_runner(thread_num) -> dict[str, dict]:
         sec_end = timer()
         lps = sec_end - sec_start
         if lps < 1:
-            time.sleep(1 - lps)
+            await asyncio.sleep(1 - lps)
         sec_end2 = timer()
         print(f"{second} | Latency per second: {sec_end2 - sec_start}")
 
