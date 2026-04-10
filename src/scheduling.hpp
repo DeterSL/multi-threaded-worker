@@ -37,26 +37,21 @@ namespace detersl::worker {
 class Scheduling {
 
     public:
-        using CompletionCallback = std::function<void(const uint64_t& request_id,
-                                                     bool failed,
-                                                     int64_t completed_at_ms)>;
-
-        void set_completion_callback(CompletionCallback cb) { completion_cb_ = std::move(cb); }
-
         void cleanup_resources();
 
         bool register_wasm_function(const nlohmann::json& j, std::string* err);
 
         bool register_workflow(const detersl::types::Workflow& workflow, std::string* err);
 
-        bool invoke_workflow(const detersl::types::InvokeDTO& request, uint64_t& id, std::string* err);
+        bool invoke_workflow(const detersl::types::InvokeDTO& request, const uint64_t& id, std::string* err);
 
-        bool get_resource(const std::string& res_name,  std::future<rust::Vec<uint8_t>>& res_data);
+        bool get_resource_async(
+            const std::string& res_name,
+            std::function<void(const rust::Vec<uint8_t>&)> on_ready);
 
         bool get_workflow_status(const std::string& request_id, detersl::types::WorkflowStatus* status);
 
     private:
-
         bool schedule_graph(Node* node,
                             detersl::types::WorkflowInvocation& invocation,
                             std::string* err);
@@ -83,7 +78,6 @@ class Scheduling {
         std::unordered_map<std::string, detersl::func::WasmFuncInfo> wasm_func_registry;
         std::unordered_map<std::string, Node*> workflow_registry;
         int next_workflow_request_id = 1;
-        CompletionCallback completion_cb_;
 };
 
 } // namespace detersl::worker

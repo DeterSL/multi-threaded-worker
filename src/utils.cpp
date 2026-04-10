@@ -4,6 +4,50 @@ using namespace detersl::worker;
 
 namespace detersl::utils {
 
+bool get_task_binding(Node* node, 
+                    std::unordered_map<std::string, std::string> resources,
+                    std::string* err){
+    if (!node) {
+        if (err) *err = "missing task node";
+        return false;
+    }
+
+    for (const auto& entry : resources) {
+        std::string parse_err;
+        ResourceBinding cur{.local_name = entry.first};
+        if (!detersl::utils::parse_resource_placeholder(
+            entry.second, cur.immediate, cur.key, cur.read_only, cur.is_local, &parse_err)) {
+            if (err) *err = parse_err;
+            return false;
+        }
+        node->resource_bindings.push_back(cur);
+    }
+    return true;
+}
+
+bool get_choice_bindings(Node* node, std::string* err){
+    if (!node) {
+        if (err) *err = "missing task node";
+        return false;
+    }
+    std::unordered_set<std::string> seen;
+    for(const auto& entry : node->Choices){
+        if(seen.count(entry.Variable) > 0){
+        continue;
+        }
+        seen.insert(entry.Variable);
+        std::string parse_err;
+        ResourceBinding cur{.local_name = entry.Variable};
+        if (!detersl::utils::parse_resource_placeholder(
+            entry.Variable, cur.immediate, cur.key, cur.read_only, cur.is_local, &parse_err)) {
+            if (err) *err = parse_err;
+            return false;
+        }
+        node->resource_bindings.push_back(cur);
+    }
+    return true;
+}
+
 bool parse_resource_placeholder(const std::string& placeholder,
                                        bool &immediate_val,
                                        std::string& name,

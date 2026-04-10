@@ -22,8 +22,6 @@ using json = nlohmann::json;
 
 namespace detersl::nats {
 
-constexpr int kResourceTimeoutMs = 3000;
-
 struct NatsConfig {
   std::string url;
   std::string subject;
@@ -60,7 +58,7 @@ json error_resp(const std::string& msg) {
 }
 
 struct Task {
-  enum class Kind { RegisterWasm, RegisterWorkflow, Status, GetResource, Invoke };
+  enum class Kind { RegisterWasm, RegisterWorkflow, GetResource, Invoke };
   Kind kind;
   json payload;
   std::optional<uint64_t> id;
@@ -112,131 +110,39 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
                               {metrics_subject},
                               true);
 
-  const unsigned control_queue_capacity = static_cast<unsigned>(
-      std::max(1, envOrInt("CONTROL_QUEUE_CAPACITY", 1024)));
-  const unsigned invoke_queue_capacity = static_cast<unsigned>(
-      std::max(cfg.batch_size, envOrInt("INVOKE_QUEUE_CAPACITY", cfg.batch_size * 100)));
+  const unsigned task_queue_capacity = static_cast<unsigned>(
+      std::max(cfg.batch_size, envOrInt("INVOKE_QUEUE_CAPACITY", 100000)));
   constexpr unsigned kMetricsQueueCapacity = 100000;
-  atomic_queue::AtomicQueueB2<Task> control_queue(control_queue_capacity);
-  atomic_queue::AtomicQueueB2<Task> invoke_queue(invoke_queue_capacity);
-  atomic_queue::AtomicQueueB2<detersl::types::MetricEvent> metrics_queue(kMetricsQueueCapacity);
+  atomic_queue::AtomicQueueB2<Task> task_queue(task_queue_capacity);
+  atomic_queue::AtomicQueueB2<detersl::metrics::InvocationMetrics> metrics_queue(kMetricsQueueCapacity);
 
-  std::cout << "NATS worker queue capacity: control=" << control_queue_capacity
-            << " invoke=" << invoke_queue_capacity
+  std::cout << "NATS worker queue capacity: task=" << task_queue_capacity
             << " metrics=" << kMetricsQueueCapacity << std::endl;
 
-  auto enqueue_task = [](auto& queue, Task&& task) {
-    while (!queue.try_push(task)) {
-      // std::cout << "task queue full" << std::endl;
-      // std::this_thread::yield();
+  auto enqueue_task = [&task_queue](Task&& task) {
+    while (!task_queue.try_push(task)) {
+      std::this_thread::yield();
     }
   };
 
-  auto enqueue_metric = [&](detersl::types::MetricEvent&& ev) {
-    while (!metrics_queue.try_push(ev)) {
-      // std::cout << "metrics queue full, dropping metric event" << std::endl;
-      // std::this_thread::yield();
-    }
-  };
-
-  const int delete_after_n_wf = 100;
-  int wf_count = 0;
-
-  scheduling.set_completion_callback(
-      [&](const uint64_t& request_id,
-          bool failed,
-          int64_t completed_at_ms) {
-        enqueue_metric(detersl::types::MetricEvent{request_id, failed, completed_at_ms});
-      });
-
-  auto handle_control_task = [&](const Task& task) {
-    json response;
-
-    try {
-      switch (task.kind) {
-        case Task::Kind::RegisterWasm: {
-          std::string err;
-          if (scheduling.register_wasm_function(task.payload, &err)) {
-            response = json{{"status", "ok"}};
-          } else {
-            response = error_resp(err);
-          }
-          publish_reply(conn, task.reply.c_str(), response);
-          break;
+  detersl::metrics::set_completion_callback(
+      [&](detersl::metrics::InvocationMetrics* metrics) {
+        while (!metrics_queue.try_push(*metrics)) {
+          std::this_thread::yield();
         }
-        case Task::Kind::RegisterWorkflow: {
-          std::string err;
-          detersl::types::Workflow workflow = task.payload.get<detersl::types::Workflow>();
-          if (scheduling.register_workflow(workflow, &err)) {
-            response = json{{"status", "ok"}};
-          } else {
-            response = error_resp(err);
-          }
-          publish_reply(conn, task.reply.c_str(), response);
-          break;
-        }
-        case Task::Kind::Status: {
-          break;
-        }
-        case Task::Kind::GetResource: {
-          auto publish_bytes = [&conn, rep = task.reply](const void* data, size_t len) {
-            try {
-              conn.publish(rep.c_str(), data, len);
-            } catch (const std::exception& e) {
-              std::cerr << "nats reply publish failed: " << e.what() << std::endl;
-            }
-          };
-
-          std::string res_name;
-          if (task.payload.is_string()) {
-            res_name = task.payload.get<std::string>();
-          } else if (task.payload.contains("res_name")) {
-            res_name = task.payload.at("res_name").get<std::string>();
-          } else {
-            publish_bytes(nullptr, 0);
-            break;
-          }
-
-          std::future<rust::Vec<uint8_t>> res_data;
-          bool found = scheduling.get_resource(res_name, res_data);
-          if (!found) {
-            publish_bytes(nullptr, 0);
-          } else {
-            const auto status = res_data.wait_for(std::chrono::milliseconds(kResourceTimeoutMs));
-            if (status == std::future_status::timeout) {
-              publish_bytes(nullptr, 0);
-            } else {
-              rust::Vec<uint8_t> data_vec = res_data.get();
-              publish_bytes(data_vec.data(), data_vec.size());
-            }
-          }
-          break;
-        }
-        case Task::Kind::Invoke:
-          break;
-      }
-    } catch (const std::exception& e) {
-      response = error_resp(std::string("handler error: ") + e.what());
-      publish_reply(conn, task.reply.c_str(), response);
-    }
-  };
-
+  });
+      
   std::thread metrics_thread([&]() {
     while (true) {
-      detersl::types::MetricEvent ev;
+      detersl::metrics::InvocationMetrics ev;
 
       if (!metrics_queue.try_pop(ev)) {
         // std::this_thread::yield();
         continue;
       }
 
-      json obj = {
-        {"request_id", ev.request_id},
-        {"failed", ev.failed},
-        {"completed_at", ev.completed_at},
-      };
+      const std::string bytes = ((json)ev).dump();
 
-      const std::string bytes = obj.dump();
       natsStatus s = js_PublishAsync(conn.jetstream(),
                                      metrics_subject.c_str(),
                                      bytes.data(),
@@ -298,8 +204,6 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
           task.kind = Task::Kind::RegisterWasm;
         } else if (op == "register_workflow") {
           task.kind = Task::Kind::RegisterWorkflow;
-        } else if (op == "status") {
-          task.kind = Task::Kind::Status;
         } else if (op == "get_resource") {
           task.kind = Task::Kind::GetResource;
         } else {
@@ -309,7 +213,7 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
           continue;
         }
 
-        enqueue_task(control_queue, std::move(task));
+        enqueue_task(std::move(task));
       } catch (const std::exception& e) {
         response = error_resp(std::string("handler error: ") + e.what());
         publish_reply(conn, natsMsg_GetReply(msg), response);
@@ -356,7 +260,7 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
 
               json parsed = nlohmann::json::parse(data, data + len);
               Task task{Task::Kind::Invoke, parsed, seq, {}};
-              enqueue_task(invoke_queue, std::move(task));
+              enqueue_task(std::move(task));
               msg.ack(invoke_sub.jsOptionsPtr());
             } catch (const std::exception& e) {
               std::cerr << "invoke handler error: " << e.what() << std::endl;
@@ -366,40 +270,98 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
         }
       } catch (const std::exception& e) {
         std::cerr << "invoke thread setup error: " << e.what() << std::endl;
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
       }
     }
   });
 
+  const int delete_after_n_wf = 100;
+  int wf_count = 0;
+
   while (true) {
     Task task;
-    if (invoke_queue.try_pop(task)) {
-      try {
-        std::string err;
-        detersl::types::InvokeDTO request = task.payload.get<detersl::types::InvokeDTO>();
+    if (!task_queue.try_pop(task)) {
+      // std::this_thread::yield();
+      continue;
+    }
 
-        if (wf_count >= delete_after_n_wf) {
-          wf_count = 0;
-          scheduling.cleanup_resources();
+    json response;
+    try {
+      switch (task.kind) {
+        case Task::Kind::Invoke: {
+          std::string err;
+          detersl::types::InvokeDTO request = task.payload.get<detersl::types::InvokeDTO>();
+
+          if (wf_count >= delete_after_n_wf) {
+            wf_count = 0;
+            scheduling.cleanup_resources();
+          }
+
+          if (scheduling.invoke_workflow(request, *task.id, &err)) {
+            wf_count++;
+          } else {
+            std::cerr << "invoke failed: " << err << std::endl;
+            break;
+          }
+          break;
         }
 
-        if (scheduling.invoke_workflow(request, *task.id, &err)) {
-          wf_count++;
-        } else {
-          std::cerr << "invoke failed: " << err << std::endl;
+        case Task::Kind::RegisterWasm: {
+          std::string err;
+          if (scheduling.register_wasm_function(task.payload, &err)) {
+            response = json{{"status", "ok"}};
+          } else {
+            response = error_resp(err);
+          }
+          publish_reply(conn, task.reply.c_str(), response);
+          break;
         }
-      } catch (const std::exception& e) {
-        std::cerr << "invoke handler error: " << e.what() << std::endl;
+
+        case Task::Kind::RegisterWorkflow: {
+          std::string err;
+          detersl::types::Workflow workflow = task.payload.get<detersl::types::Workflow>();
+          if (scheduling.register_workflow(workflow, &err)) {
+            response = json{{"status", "ok"}};
+          } else {
+            response = error_resp(err);
+          }
+          publish_reply(conn, task.reply.c_str(), response);
+          break;
+        }
+
+        case Task::Kind::GetResource: {
+          auto publish_bytes = [&conn, rep = task.reply](const void* data, size_t len) {
+            try {
+              conn.publish(rep.c_str(), data, len);
+            } catch (const std::exception& e) {
+              std::cerr << "nats reply publish failed: " << e.what() << std::endl;
+            }
+          };
+
+          std::string res_name;
+          if (task.payload.is_string()) {
+            res_name = task.payload.get<std::string>();
+          } else if (task.payload.contains("res_name")) {
+            res_name = task.payload.at("res_name").get<std::string>();
+          } else {
+            publish_bytes(nullptr, 0);
+            break;
+          }
+
+          bool found = scheduling.get_resource_async(
+              res_name,
+              [publish_bytes](const rust::Vec<uint8_t>& data) {
+                publish_bytes(data.data(), data.size());
+              });
+          if (!found) {
+            publish_bytes(nullptr, 0);
+          }
+          break;
+        }
       }
-      continue;
+    } catch (const std::exception& e) {
+      response = error_resp(std::string("handler error: ") + e.what());
+      publish_reply(conn, task.reply.c_str(), response);
     }
-
-    if (control_queue.try_pop(task)) {
-      handle_control_task(task);
-      continue;
-    }
-
-    //std::this_thread::yield();
   }
 }
 

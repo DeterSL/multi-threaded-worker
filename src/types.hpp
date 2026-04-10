@@ -95,12 +95,6 @@ namespace detersl {
             int64_t completed_at_ms = -1;
         };
 
-        struct MetricEvent {
-            uint64_t request_id;
-            bool failed{false};
-            int64_t completed_at{-1};
-        };
-
         // ---------- nlohmann::json (de)serialization ----------
         inline void to_json(json& j, const State& v);
         inline void from_json(const json& j, State& v);
@@ -186,17 +180,5 @@ namespace detersl {
             if(j.contains("can_abort")) v.can_abort = j.at("can_abort").get<bool>();
         }
 
-        inline void to_json(json& j, const MetricEvent& v) {
-            j = json::object();
-            j["request_id"]   = v.request_id;
-            j["failed"]      = v.failed;
-            j["completed_at"]   = v.completed_at;
-        }
-
-        inline void from_json(const json& j, MetricEvent& v) {
-            v.request_id  = j.at("request_id").get<uint64_t>();
-            v.failed     = j.at("failed").get<bool>();
-            v.completed_at = j.at("completed_at").get<int64_t>();
-        }
     }
 }

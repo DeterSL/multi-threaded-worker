@@ -27,50 +27,6 @@ static std::string lower(const std::string& s) {
         return NodeType::Unknown;
     }
 
-    bool get_task_binding(Node* node, 
-                        std::unordered_map<std::string, std::string> resources,
-                        std::string* err){
-        if (!node) {
-            if (err) *err = "missing task node";
-            return false;
-        }
-
-        for (const auto& entry : resources) {
-            std::string parse_err;
-            ResourceBinding cur{.local_name = entry.first};
-            if (!detersl::utils::parse_resource_placeholder(
-                entry.second, cur.immediate, cur.key, cur.read_only, cur.is_local, &parse_err)) {
-                if (err) *err = parse_err;
-                return false;
-            }
-            node->resource_bindings.push_back(cur);
-        }
-        return true;
-    }
-
-    bool get_choice_bindings(Node* node, std::string* err){
-        if (!node) {
-            if (err) *err = "missing task node";
-            return false;
-        }
-        std::unordered_set<std::string> seen;
-        for(const auto& entry : node->Choices){
-            if(seen.count(entry.Variable) > 0){
-            continue;
-            }
-            seen.insert(entry.Variable);
-            std::string parse_err;
-            ResourceBinding cur{.local_name = entry.Variable};
-            if (!detersl::utils::parse_resource_placeholder(
-                entry.Variable, cur.immediate, cur.key, cur.read_only, cur.is_local, &parse_err)) {
-                if (err) *err = parse_err;
-                return false;
-            }
-            node->resource_bindings.push_back(cur);
-        }
-        return true;
-    }
-
     std::string Node::ID() const {
         return WorkflowID + ":" + StateID;
     }
@@ -108,7 +64,7 @@ static std::string lower(const std::string& s) {
             };
 
             if (n->Type == NodeType::Task) {
-                if(!get_task_binding(n, st.Resources, err)){
+                if(!detersl::utils::get_task_binding(n, st.Resources, err)){
                     return nullptr;
                 }
                 n->Next = next;
@@ -156,7 +112,7 @@ static std::string lower(const std::string& s) {
                     return idi < idj;
                 });
                 n->Choices = std::move(edges);
-                if(!get_choice_bindings(n, err)){
+                if(!detersl::utils::get_choice_bindings(n, err)){
                     return nullptr;
                 }
             } else {

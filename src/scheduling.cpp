@@ -278,7 +278,7 @@ void Scheduling::schedule_commit_behaviour(detersl::types::WorkflowInvocation& i
   const std::shared_ptr<std::atomic<bool>>& failed = invocation.failed;
   if(!invocation.request.can_abort){
     when(invocation_cown) << [metrics](auto ic){
-       metrics->complete();
+      metrics->complete();
     };
     return;
   }
@@ -445,7 +445,7 @@ bool Scheduling::register_workflow(const detersl::types::Workflow& workflow, std
   return true;
 }
 
-bool Scheduling::invoke_workflow(const detersl::types::InvokeDTO& request, uint64_t& id, std::string* err)
+bool Scheduling::invoke_workflow(const detersl::types::InvokeDTO& request, const uint64_t& id, std::string* err)
 {
   auto it = workflow_registry.find(request.WorkflowID);
   if (it == workflow_registry.end()) {
@@ -461,8 +461,7 @@ bool Scheduling::invoke_workflow(const detersl::types::InvokeDTO& request, uint6
     .failed = std::make_shared<std::atomic<bool>>(false),
     .metrics = std::make_shared<detersl::metrics::InvocationMetrics>(
         id,
-        invocation.failed,
-        completion_cb_),
+        invocation.failed),
     .request = std::move(request)
   };
   
@@ -485,7 +484,9 @@ void Scheduling::cleanup_resources()
   }
 }
 
-bool Scheduling::get_resource(const std::string &res_name, std::future<rust::Vec<uint8_t>>& res_data) {
+bool Scheduling::get_resource_async(
+    const std::string& res_name,
+    std::function<void(const rust::Vec<uint8_t>&)> on_ready) {
   auto it = resource_map.find(res_name);
 
   if (it == resource_map.end()) {
@@ -493,14 +494,10 @@ bool Scheduling::get_resource(const std::string &res_name, std::future<rust::Vec
   }
   auto res = it->second.first;
 
-  auto promise = std::make_shared<std::promise<rust::Vec<uint8_t>>>();
-  res_data = promise->get_future();
-
-  when(read(res)) << [promise](auto r) {
-    promise->set_value(r->get_data().as_vec());
+  when(read(res)) << [on_ready = std::move(on_ready)](auto r){
+    on_ready(r->get_data().as_vec());
   };
 
   return true;
 }
-
 } // namespace detersl::worker
