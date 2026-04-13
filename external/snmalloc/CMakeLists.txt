@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.21)
 project(snmalloc CXX)
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -28,6 +28,7 @@ option(SNMALLOC_IPO "Link with IPO/LTO support" OFF)
 option(SNMALLOC_BENCHMARK_INDIVIDUAL_MITIGATIONS "Build tests and ld_preload for individual mitigations" OFF)
 option(SNMALLOC_ENABLE_DYNAMIC_LOADING "Build such that snmalloc can be dynamically loaded. This is not required for LD_PRELOAD, and will harm performance if enabled." OFF)
 option(SNMALLOC_ENABLE_WAIT_ON_ADDRESS "Use wait on address backoff strategy if it is available" ON)
+option(SNMALLOC_PTHREAD_FORK_PROTECTION "Guard against forking while allocator locks are held using pthread_atfork hooks" OFF)
 option(SNMALLOC_ENABLE_FUZZING "Enable fuzzing instrumentation tests" OFF)
 option(SNMALLOC_USE_SELF_VENDORED_STL "Avoid using system STL" OFF)
 # Options that apply only if we're not building the header-only library
@@ -133,6 +134,9 @@ int main() {
 }
 " SNMALLOC_PTHREAD_ATFORK_WORKS)
 
+if (SNMALLOC_PTHREAD_FORK_PROTECTION AND NOT SNMALLOC_PTHREAD_ATFORK_WORKS)
+  message(FATAL_ERROR "SNMALLOC_PTHREAD_FORK_PROTECTION requires working pthread_atfork support")
+endif()
 
 if (NOT MSVC AND NOT (SNMALLOC_CLEANUP STREQUAL CXX11_DESTRUCTORS))
   # If the target compiler doesn't support -nostdlib++ then we must enable C at
@@ -209,29 +213,87 @@ function(warnings_high)
   endif()
 endfunction()
 
+# clangformat_targets([VERSION <ver>]
+#                     [TARGET_NAME <name>]
+#                     [INCLUDE_PATTERNS <glob> ...]
+#                     [EXCLUDE_PATTERNS <regex> ...])
+#
+# Generate a CMake target that runs clang-format on a set of source files.
+# A companion <name>-check target is also created that verifies formatting
+# without modifying files (--dry-run --Werror), suitable for CI.
+#
+# Options:
+#   VERSION          - clang-format version to search for (default: 15).
+#                      Falls back to the unversioned 'clang-format' with a
+#                      warning if the requested version is not found.
+#   TARGET_NAME      - Name of the generated targets (default: clangformat).
+#   INCLUDE_PATTERNS - Glob patterns passed to file(GLOB_RECURSE) to collect
+#                      source files (default: src/*.cc src/*.h src/*.hh).
+#   EXCLUDE_PATTERNS - Regex patterns used to exclude files from the collected
+#                      list (default: src/[^/]*/[^/]*_concept\.h$).
 function(clangformat_targets)
+  cmake_parse_arguments(
+    CLANGFMT
+    ""
+    "VERSION;TARGET_NAME"
+    "INCLUDE_PATTERNS;EXCLUDE_PATTERNS"
+    ${ARGN}
+  )
+
+  # Default inclusion globs match this project's source layout.
+  if (NOT CLANGFMT_INCLUDE_PATTERNS)
+    set(CLANGFMT_INCLUDE_PATTERNS src/*.cc src/*.h src/*.hh)
+  endif()
+
+  # Default exclusion regexes skip concept headers that clang-format
+  # does not yet handle well.  See https://reviews.llvm.org/D79773
+  if (NOT CLANGFMT_EXCLUDE_PATTERNS)
+    set(CLANGFMT_EXCLUDE_PATTERNS "src/[^/]*/[^/]*_concept\\.h$")
+  endif()
+
+  # Default clang-format version.
+  if (NOT CLANGFMT_VERSION)
+    set(CLANGFMT_VERSION 15)
+  endif()
+
+  # Default target name.
+  if (NOT CLANGFMT_TARGET_NAME)
+    set(CLANGFMT_TARGET_NAME clangformat)
+  endif()
+
   # The clang-format tool is installed under a variety of different names.  Try
-  # to find a sensible one.  Only look for versions 9 explicitly - we don't
-  # know whether our clang-format file will work with newer versions of the
-  # tool.  It does not work with older versions as AfterCaseLabel is not supported
-  # in earlier versions.
+  # to find a sensible one.  Look for the requested version first, then fall
+  # back to the unversioned name.
   find_program(CLANG_FORMAT NAMES
-    clang-format150 clang-format-15)
+    clang-format${CLANGFMT_VERSION}0
+    clang-format-${CLANGFMT_VERSION})
+
+  if (${CLANG_FORMAT} STREQUAL "CLANG_FORMAT-NOTFOUND")
+    find_program(CLANG_FORMAT NAMES clang-format)
+    if (NOT ${CLANG_FORMAT} STREQUAL "CLANG_FORMAT-NOTFOUND")
+      message(WARNING "Could not find clang-format version ${CLANGFMT_VERSION}, falling back to ${CLANG_FORMAT}")
+    endif()
+  endif()
 
   # If we've found a clang-format tool, generate a target for it, otherwise emit
   # a warning.
   if (${CLANG_FORMAT} STREQUAL "CLANG_FORMAT-NOTFOUND")
-    message(WARNING "Not generating clangformat target, no clang-format tool found")
+    message(WARNING "Not generating ${CLANGFMT_TARGET_NAME} target, no clang-format tool found")
   else ()
-    message(STATUS "Generating clangformat target using ${CLANG_FORMAT}")
-    file(GLOB_RECURSE ALL_SOURCE_FILES CONFIGURE_DEPENDS src/*.cc src/*.h src/*.hh)
-    # clangformat does not yet understand concepts well; for the moment, don't
-    # ask it to format them.  See https://reviews.llvm.org/D79773
-    list(FILTER ALL_SOURCE_FILES EXCLUDE REGEX "src/[^/]*/[^/]*_concept\.h$")
+    message(STATUS "Generating ${CLANGFMT_TARGET_NAME} target using ${CLANG_FORMAT}")
+    file(GLOB_RECURSE ALL_SOURCE_FILES CONFIGURE_DEPENDS ${CLANGFMT_INCLUDE_PATTERNS})
+    foreach(pattern IN LISTS CLANGFMT_EXCLUDE_PATTERNS)
+      list(FILTER ALL_SOURCE_FILES EXCLUDE REGEX "${pattern}")
+    endforeach()
     add_custom_target(
-      clangformat
+      ${CLANGFMT_TARGET_NAME}
       COMMAND ${CLANG_FORMAT}
       -i
+      ${ALL_SOURCE_FILES})
+    add_custom_target(
+      ${CLANGFMT_TARGET_NAME}-check
+      COMMAND ${CLANG_FORMAT}
+      --dry-run --Werror
       ${ALL_SOURCE_FILES})
   endif()
 endfunction()
@@ -288,7 +350,7 @@ endif()
 # Add header paths.
 target_include_directories(snmalloc
   INTERFACE
-    $<INSTALL_INTERFACE:include/snmalloc>
+    $<INSTALL_INTERFACE:include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
 
 if(NOT MSVC)
@@ -333,6 +395,7 @@ endfunction()
 add_as_define(SNMALLOC_QEMU_WORKAROUND)
 add_as_define(SNMALLOC_TRACING)
 add_as_define(SNMALLOC_CI_BUILD)
+add_as_define(SNMALLOC_PTHREAD_FORK_PROTECTION)
 add_as_define(SNMALLOC_PLATFORM_HAS_GETENTROPY)
 add_as_define(SNMALLOC_PTHREAD_ATFORK_WORKS)
 add_as_define(SNMALLOC_HAS_LINUX_RANDOM_H)
@@ -508,7 +571,12 @@ if(NOT SNMALLOC_HEADER_ONLY_LIBRARY)
 
   function(compile name TYPE ${ARGN})
     add_library(${name} ${TYPE} ${ARGN})
-    target_link_libraries(${name} snmalloc)
+    target_link_libraries(${name} PRIVATE snmalloc)
+
+    # PRIVATE linking still touches INTERFACE level linking for unknown reasons.
+    # Check https://github.com/microsoft/snmalloc/pull/799 for details.
+    set_target_properties(${name} PROPERTIES INTERFACE_LINK_LIBRARIES "")
+
     target_compile_definitions(${name} PRIVATE "SNMALLOC_USE_${SNMALLOC_CLEANUP}")
 
     add_warning_flags(${name})

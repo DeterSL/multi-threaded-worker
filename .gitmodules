@@ -1,9 +1,3 @@
-[submodule "external/verona-rt"]
-	path = external/verona-rt
-	url = git@github.com:microsoft/verona-rt.git
-[submodule "external/snmalloc"]
-	path = external/snmalloc
-	url = git@github.com:microsoft/snmalloc.git
 [submodule "external/wasm-exec-env"]
 	path = external/wasm-exec-env
 	url = https://github.com/DeterSL/wasm-exec-env
