@@ -13,6 +13,7 @@ namespace detersl::worker {
 using detersl::types::Workflow;
 using detersl::types::State;
 using detersl::types::Choice;
+using detersl::fastjson::Value;
 
 static std::string lower(const std::string& s) {
         std::string t = s;
@@ -31,7 +32,7 @@ static std::string lower(const std::string& s) {
         return WorkflowID + ":" + StateID;
     }
 
-    static bool toOperandValue(const Choice& c, std::string& op, json& val, std::string& err) {
+    static bool toOperandValue(const Choice& c, std::string& op, Value& val, std::string& err) {
         if (c.NumericEq) { op = "=="; val = *c.NumericEq; return true; }
         if (c.NumericGT) { op = ">";  val = *c.NumericGT; return true; }
         if (c.NumericGTE){ op = ">="; val = *c.NumericGTE; return true; }
@@ -85,7 +86,7 @@ static std::string lower(const std::string& s) {
                         if (err) *err = "choice at index " + state_id + " rule missing variable";
                         return nullptr;
                     }
-                    std::string op; json val;
+                    std::string op; Value val;
                     std::string terr;
                     if (!toOperandValue(c, op, val, terr)) {
                         if (err) *err = "choice at index " + state_id + ": " + terr;
@@ -152,24 +153,33 @@ static std::string lower(const std::string& s) {
         return root;
     }
 
-    static bool asNumber(const json& v, uint32_t* out) {
-        if (v.is_number_float()) { *out = static_cast<uint32_t>(v.get<double>()); return true; }
-        if (v.is_number_integer()) { *out = static_cast<uint32_t>(v.get<long long>()); return true; }
-        if (v.is_string()) { try { *out = std::stoi(v.get<std::string>()); return true; } catch(...){} }
+    static bool asNumber(const detersl::fastjson::InputField& v, uint32_t* out) {
+        if (v.is_double()) { *out = static_cast<uint32_t>(v.get_double()); return true; }
+        if (v.is_int64()) { *out = static_cast<uint32_t>(v.get_int64()); return true; }
+        if (v.is_uint64()) { *out = static_cast<uint32_t>(v.get_uint64()); return true; }
+        if (v.is_string()) { try { *out = static_cast<uint32_t>(std::stoull(v.get_string())); return true; } catch(...){} }
         return false;
     }
 
-    bool cmp(const json& actual, const std::string& operand, const json& rhs, bool* match) {
+    static bool asNumber(const Value& v, uint32_t* out) {
+        if (v.is_double()) { *out = static_cast<uint32_t>(v.get_double()); return true; }
+        if (v.is_int64()) { *out = static_cast<uint32_t>(v.get_int64()); return true; }
+        if (v.is_uint64()) { *out = static_cast<uint32_t>(v.get_uint64()); return true; }
+        if (v.is_string()) { try { *out = static_cast<uint32_t>(std::stoull(v.get_string())); return true; } catch(...){} }
+        return false;
+    }
+
+    bool cmp(const detersl::fastjson::InputField& actual, const std::string& operand, const Value& rhs, bool* match) {
         if (operand == "==" || operand == "eq") {
-            if (rhs.is_string()) { *match = actual.is_string() && actual.get<std::string>() == rhs.get<std::string>(); return true; }
-            if (rhs.is_boolean()) { *match = actual.is_boolean() && actual.get<bool>() == rhs.get<bool>(); return true; }
+            if (rhs.is_string()) { *match = actual.is_string() && actual.get_string() == rhs.get_string(); return true; }
+            if (rhs.is_bool()) { *match = actual.is_bool() && actual.get_bool() == rhs.get_bool(); return true; }
             uint32_t af, rf;
             bool aok = asNumber(actual, &af), rok = asNumber(rhs, &rf);
             *match = aok && rok && (af == rf);
             return true;
         } else if (operand == "!=") {
-            if (rhs.is_string()) { *match = actual.is_string() && actual.get<std::string>() != rhs.get<std::string>(); return true; }
-            if (rhs.is_boolean()) { *match = actual.is_boolean() && actual.get<bool>() != rhs.get<bool>(); return true; }
+            if (rhs.is_string()) { *match = actual.is_string() && actual.get_string() != rhs.get_string(); return true; }
+            if (rhs.is_bool()) { *match = actual.is_bool() && actual.get_bool() != rhs.get_bool(); return true; }
             uint32_t af, rf;
             bool aok = asNumber(actual, &af), rok = asNumber(rhs, &rf);
             *match = aok && rok && (af != rf);
@@ -185,8 +195,8 @@ static std::string lower(const std::string& s) {
             if (operand == "<=") *match = af <= rf;
             return true;
         } else if (operand == "bool") {
-            if (!rhs.is_boolean()) return false;
-            *match = actual.is_boolean() && actual.get<bool>() == rhs.get<bool>();
+            if (!rhs.is_bool()) return false;
+            *match = actual.is_bool() && actual.get_bool() == rhs.get_bool();
             return true;
         } else if (operand == "default") {
             *match = true;
@@ -195,7 +205,7 @@ static std::string lower(const std::string& s) {
         return false;
     }
 
-    bool cmpBytes(const detersl::types::Bytes& actual, const std::string& operand, const json& rhs, bool* match) {
+    bool cmpBytes(const detersl::types::Bytes& actual, const std::string& operand, const Value& rhs, bool* match) {
         const auto& vec = actual.as_vec();
 
         auto bytes_equal_raw = [&vec](const uint8_t* data, size_t size) -> bool {
@@ -231,14 +241,14 @@ static std::string lower(const std::string& s) {
             bool comparable = true;
 
             if (rhs.is_string()) {
-                const auto& rhs_str = rhs.get_ref<const std::string&>();
+                const auto& rhs_str = rhs.get_string();
                 eq = bytes_equal_raw(reinterpret_cast<const uint8_t*>(rhs_str.data()), rhs_str.size());
-            } else if (rhs.is_boolean()) {
+            } else if (rhs.is_bool()) {
                 bool bv = false;
                 if (!bytes_to_bool(&bv)) {
                     comparable = false;
                 } else {
-                    eq = (bv == rhs.get<bool>());
+                    eq = (bv == rhs.get_bool());
                 }
             } 
             else {
@@ -264,10 +274,10 @@ static std::string lower(const std::string& s) {
             if (operand == "<=") *match = af <= rf;
             return true;
         } else if (operand == "bool") {
-            if (!rhs.is_boolean()) return false;
+            if (!rhs.is_bool()) return false;
             bool bv = false;
             if (!bytes_to_bool(&bv)) { *match = false; return true; }
-            *match = bv == rhs.get<bool>();
+            *match = bv == rhs.get_bool();
             return true;
         } else if (operand == "default") {
             *match = true;

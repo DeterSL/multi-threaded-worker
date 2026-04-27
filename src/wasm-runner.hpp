@@ -23,9 +23,9 @@ namespace detersl {
             public:
                 WasmRunner(acquired_cown_span<detersl::types::Resource> rw_cown_arr,
                     acquired_cown_span<const detersl::types::Resource> ro_cown_arr,
-                    detersl::func::WasmFuncInfo func_info) : 
-                    func_info_(std::move(func_info)),
-                    Runner(rw_cown_arr, ro_cown_arr, func_info) {
+                    const detersl::func::WasmFuncInfo& func_info) :
+                    Runner(rw_cown_arr, ro_cown_arr, func_info),
+                    func_info_(func_info) {
                         if (!worker_excutioner) {
                             // Threre is no executioner on this thread.
                             // Lets make it
@@ -40,16 +40,12 @@ namespace detersl {
                 WasmRunner(WasmRunner&&) = delete;
                 WasmRunner& operator=(WasmRunner&&) = delete;
 
-                void set_func(detersl::func::WasmFuncInfo func) {
-                    func_info_ = std::move(func);
-                }
-
                 bool run() override{
                     bool ok = true;
                     try{                    
-                        worker_excutioner->execution_func(std::move(func_info_));
-                    } catch (const std::exception& e) {
-                        std::cerr << "Exception during WasmRunner run: " << e.what() << std::endl;
+                        worker_excutioner->execution_func(func_info_);
+                    } catch (...) {
+                        std::cerr << "Unknown exception during WasmRunner of function " << func_info_.func_name << std::endl;
                         ok = false;
                     }
 
@@ -63,7 +59,7 @@ namespace detersl {
                 ~WasmRunner() = default;
 
             protected:
-                detersl::func::WasmFuncInfo func_info_;
+                const detersl::func::WasmFuncInfo& func_info_;
         };
     }
 }

@@ -119,48 +119,51 @@ bool parse_resource_placeholder(const std::string& placeholder,
 
 bool resolve_resources(const Node* node,
                               detersl::types::WorkflowInvocation& invocation,
-                              std::unordered_map<std::string, nlohmann::json>& resource_inputs,
+                              detersl::fastjson::ResourceInputs& resource_inputs,
                               std::vector<std::string>& resource_names,
                               std::unordered_set<std::string>* read_only,
-                              std::unordered_map<std::string, nlohmann::json>& value_inputs,
+                              detersl::fastjson::ValueInputs& value_inputs,
                               std::string* err,
                               bool allow_variadic) {
   if (!node) {
     if (err) *err = "missing task node";
     return false;
   }
-  nlohmann::json &invocation_resources = invocation.request.Input;
+  detersl::fastjson::InputObject& invocation_resources = invocation.request.Input;
   std::unordered_map<std::string, cown_ptr<detersl::types::Resource>> &workflow_resources = invocation.workflow_resources;
 
   for (const ResourceBinding &cur : node->resource_bindings) {
-    if (cur.immediate) {
-      if (!invocation_resources.contains(cur.key)) {
-        if (err) *err = "missing value resource \"" + cur.key + "\" in invocation";
-        return false;
+    auto input_it = invocation_resources.find(cur.key);
+    if (input_it == invocation_resources.end()) {
+      if (err) {
+        *err = std::string(cur.immediate ? "missing value resource \"" : "missing resource \"") + cur.key + "\" in invocation";
       }
-      value_inputs[cur.local_name] = invocation_resources.at(cur.key);
+      return false;
+    }
+
+    if (cur.immediate) {
+      value_inputs[cur.local_name] = input_it->second;
       continue;
     }
 
     if (cur.is_local) {
-      if (!invocation_resources.contains(cur.key)) {
-        if (err) *err = "missing resource \"" + cur.key + "\" in invocation";
-        return false;
-      }
-      const nlohmann::json& input_val = invocation_resources.at(cur.key);
+      const detersl::fastjson::InputField& input_val = input_it->second;
       if (input_val.is_array()) {
         if (!allow_variadic) {
           if (err) *err = "resource \"" + cur.key + "\" must map to a string";
           return false;
         }
-        nlohmann::json runtime_vals = nlohmann::json::array();
-        for (const auto& entry : input_val) {
-          if (!entry.is_string()) {
-            if (err) *err = "resource \"" + cur.key + "\" array entries must be strings";
-            return false;
-          }
+        const std::vector<std::string>* entries = nullptr;
+        std::string parse_err;
+        if (!input_val.get_string_array(&entries, &parse_err)) {
+          if (err) *err = "resource \"" + cur.key + "\" array entries must be strings";
+          return false;
+        }
+        std::vector<std::string> runtime_vals;
+        runtime_vals.reserve(entries->size());
+        for (const std::string& entry : *entries) {
           const std::string runtime_name =
-              std::to_string(invocation.invocation_id) + ":" + entry.get<std::string>();
+              std::to_string(invocation.invocation_id) + ":" + entry;
           if (workflow_resources.find(runtime_name) == workflow_resources.end()) {
             workflow_resources[runtime_name] = make_cown<detersl::types::Resource>();
           }
@@ -170,7 +173,7 @@ bool resolve_resources(const Node* node,
             read_only->insert(runtime_name);
           }
         }
-        resource_inputs[cur.local_name] = std::move(runtime_vals);
+        resource_inputs[cur.local_name] = detersl::fastjson::ResourceValue(std::move(runtime_vals));
         continue;
       }
       if (!input_val.is_string()) {
@@ -178,11 +181,11 @@ bool resolve_resources(const Node* node,
         return false;
       }
       const std::string runtime_name =
-          std::to_string(invocation.invocation_id) + ":" + input_val.get<std::string>();
+          std::to_string(invocation.invocation_id) + ":" + input_val.get_string();
       if (workflow_resources.find(runtime_name) == workflow_resources.end()) {
         workflow_resources[runtime_name] = make_cown<detersl::types::Resource>();
       }
-      resource_inputs[cur.local_name] = runtime_name;
+      resource_inputs[cur.local_name] = detersl::fastjson::ResourceValue(runtime_name);
       resource_names.push_back(runtime_name);
       if (read_only && cur.read_only) {
         read_only->insert(runtime_name);
@@ -192,29 +195,25 @@ bool resolve_resources(const Node* node,
 
     {
       //global resource
-      if (!invocation_resources.contains(cur.key)) {
-        if (err) *err = "missing resource \"" + cur.key + "\" in invocation";
-        return false;
-      }
-
-      const nlohmann::json& input_val = invocation_resources.at(cur.key);
+      const detersl::fastjson::InputField& input_val = input_it->second;
       if (input_val.is_array()) {
         if (!allow_variadic) {
           if (err) *err = "resource \"" + cur.key + "\" must map to a string";
           return false;
         }
-        for (const auto& entry : input_val) {
-          if (!entry.is_string()) {
-            if (err) *err = "resource \"" + cur.key + "\" array entries must be strings";
-            return false;
-          }
-          const std::string runtime_name = entry.get<std::string>();
+        const std::vector<std::string>* entries = nullptr;
+        std::string parse_err;
+        if (!input_val.get_string_array(&entries, &parse_err)) {
+          if (err) *err = "resource \"" + cur.key + "\" array entries must be strings";
+          return false;
+        }
+        for (const std::string& runtime_name : *entries) {
           resource_names.push_back(runtime_name);
           if (read_only && cur.read_only) {
             read_only->insert(runtime_name);
           }
         }
-        resource_inputs[cur.local_name] = input_val;
+        resource_inputs[cur.local_name] = detersl::fastjson::ResourceValue(std::vector<std::string>(*entries));
         continue;
       }
 
@@ -223,8 +222,8 @@ bool resolve_resources(const Node* node,
         return false;
       }
 
-      const std::string runtime_name = input_val.get<std::string>();
-      resource_inputs[cur.local_name] = runtime_name;
+      const std::string runtime_name = input_val.get_string();
+      resource_inputs[cur.local_name] = detersl::fastjson::ResourceValue(runtime_name);
       resource_names.push_back(runtime_name);
       if (read_only && cur.read_only) {
         read_only->insert(runtime_name);

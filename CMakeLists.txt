@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.18)
 project(detersl-worker)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(APPLE)
@@ -19,6 +19,21 @@ if (NOT nlohmann_json_FOUND)
         GIT_TAG        v3.11.3
     )
     FetchContent_MakeAvailable(nlohmann_json)
+endif()
+
+find_package(simdjson CONFIG QUIET)
+if (NOT TARGET simdjson AND TARGET simdjson::simdjson)
+    add_library(simdjson ALIAS simdjson::simdjson)
+endif()
+if (NOT TARGET simdjson)
+    message(STATUS "simdjson not found, fetching...")
+    FetchContent_Declare(
+        simdjson
+        GIT_REPOSITORY https://github.com/simdjson/simdjson.git
+        GIT_TAG        v4.2.4
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(simdjson)
 endif()
 
 find_package(OpenSSL REQUIRED)
@@ -89,7 +104,7 @@ add_library(detersl_worker_core STATIC
     src/runner.cpp
     src/scheduling.cpp
     src/graph.cpp
-    src/metrics.cpp
+    src/status.cpp
     src/utils.cpp
     src/nats_raii.cpp
     src/nats-worker.cpp
@@ -100,6 +115,7 @@ add_dependencies(detersl_worker_core detersl_rust)
 target_link_libraries(detersl_worker_core PUBLIC
     detersl_common
     nlohmann_json::nlohmann_json
+    simdjson
     httplib::httplib
 )
 
@@ -137,6 +153,13 @@ if (NATS_LIBRARY)
   target_link_libraries(detersl-worker PRIVATE ${NATS_LIBRARY})
 endif()
 
+target_include_directories(detersl-worker PRIVATE ${OPENSSL_INCLUDE_DIR})
+target_link_libraries(detersl-worker PRIVATE ${OPENSSL_CRYPTO_LIBRARY} ${OPENSSL_SSL_LIBRARY})
+
+if (UNIX AND NOT APPLE)
+  target_link_options(detersl-worker PRIVATE -Wl,--no-as-needed)
+endif()
+
 target_compile_options(detersl_worker_core PRIVATE
   $<$<CONFIG:Release>:-O3 -march=native>
 )
@@ -144,10 +167,3 @@ target_compile_options(detersl_worker_core PRIVATE
 target_link_options(detersl-worker PRIVATE
   $<$<CONFIG:Release>:-flto>
 )
-
-target_include_directories(detersl-worker PRIVATE ${OPENSSL_INCLUDE_DIR})
-target_link_libraries(detersl-worker PRIVATE ${OPENSSL_CRYPTO_LIBRARY} ${OPENSSL_SSL_LIBRARY})
-
-if (UNIX AND NOT APPLE)
-  target_link_options(detersl-worker PRIVATE -Wl,--no-as-needed)
-endif()

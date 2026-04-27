@@ -24,57 +24,51 @@ inline T require_field(const nlohmann::json& j, const char* key) {
 struct FuncBinarySource {
     std::string type;
     std::string path;
-
-    static FuncBinarySource from_json(const nlohmann::json& j) {
-        require_object(j, "func_binary_source");
-        FuncBinarySource s;
-        s.type = require_field<std::string>(j, "type");
-        s.path = require_field<std::string>(j, "path");
-        return s;
-    }
-
-    nlohmann::json to_json() const {
-        return nlohmann::json{
-            {"type", type},
-            {"path", path}
-        };
-    }
 };
+
+inline void from_json(const nlohmann::json& j, FuncBinarySource& v) {
+    require_object(j, "func_binary_source");
+    v.type = require_field<std::string>(j, "type");
+    v.path = require_field<std::string>(j, "path");
+}
+
+inline void to_json(nlohmann::json& j, const FuncBinarySource& v) {
+    j = nlohmann::json{
+        {"type", v.type},
+        {"path", v.path}
+    };
+}
 
 struct FuncInputEvent {
     std::string type;
     std::string data;
-
-    static FuncInputEvent from_json(const nlohmann::json& j) {
-        FuncInputEvent e; 
-        e.type = j.value("type", "data");
-        if (j.contains("data")) e.data = j.at("data").get<std::string>();
-        return e;
-    }
-
-    nlohmann::json to_json() const {
-        return nlohmann::json{
-            {"type", type},
-            {"data", data}
-        };
-    }
 };
+
+inline void from_json(const nlohmann::json& j, FuncInputEvent& v) {
+    v.type = j.value("type", "data");
+    if (j.contains("data")) v.data = j.at("data").get<std::string>();
+}
+
+inline void to_json(nlohmann::json& j, const FuncInputEvent& v) {
+    j = nlohmann::json{
+        {"type", v.type},
+        {"data", v.data}
+    };
+}
 
 struct FuncOutputEvent {
     std::string type;
-
-    static FuncOutputEvent from_json(const nlohmann::json& j) {
-        FuncOutputEvent e;
-        e.type = j.value("type", "default");
-        return e;
-    }
-
-    nlohmann::json to_json() const {
-        return nlohmann::json{
-            {"type", type}
-        };
-    }
 };
+
+inline void from_json(const nlohmann::json& j, FuncOutputEvent& v) {
+    v.type = j.value("type", "default");
+}
+
+inline void to_json(nlohmann::json& j, const FuncOutputEvent& v) {
+    j = nlohmann::json{
+        {"type", v.type}
+    };
+}
 
 struct FuncLinkOpt {
     bool link_clocks = true;
@@ -83,29 +77,27 @@ struct FuncLinkOpt {
     bool link_cli = true;
     bool link_io = true;
     bool link_socket = true;
-
-    static FuncLinkOpt from_json(const nlohmann::json& j) {
-        FuncLinkOpt o;
-        o.link_clocks     = j.value("link_clocks", true);
-        o.link_filesystem = j.value("link_filesystem", true);
-        o.link_random     = j.value("link_random", true);
-        o.link_cli        = j.value("link_cli", true);
-        o.link_io         = j.value("link_io", true);
-        o.link_socket     = j.value("link_socket", true);
-        return o;
-    }
-
-    nlohmann::json to_json() const {
-        return nlohmann::json{
-            {"link_clocks", link_clocks},
-            {"link_filesystem", link_filesystem},
-            {"link_random", link_random},
-            {"link_cli", link_cli},
-            {"link_io", link_io},
-            {"link_socket", link_socket}
-        };
-    }
 };
+
+inline void from_json(const nlohmann::json& j, FuncLinkOpt& v) {
+    v.link_clocks     = j.value("link_clocks", true);
+    v.link_filesystem = j.value("link_filesystem", true);
+    v.link_random     = j.value("link_random", true);
+    v.link_cli        = j.value("link_cli", true);
+    v.link_io         = j.value("link_io", true);
+    v.link_socket     = j.value("link_socket", true);
+}
+
+inline void to_json(nlohmann::json& j, const FuncLinkOpt& v) {
+    j = nlohmann::json{
+        {"link_clocks", v.link_clocks},
+        {"link_filesystem", v.link_filesystem},
+        {"link_random", v.link_random},
+        {"link_cli", v.link_cli},
+        {"link_io", v.link_io},
+        {"link_socket", v.link_socket}
+    };
+}
 
 struct FuncExecutionPolicy {
     bool allow_clocks = true;
@@ -113,50 +105,46 @@ struct FuncExecutionPolicy {
     bool allow_random = true;
     bool allow_cli = true;
     bool allow_socket = false;
-
-    static FuncExecutionPolicy from_json(const nlohmann::json& j) {
-        FuncExecutionPolicy p;
-        p.allow_clocks     = j.value("allow_clocks", true);
-        p.allow_filesystem = j.value("allow_filesystem", false);
-        p.allow_random     = j.value("allow_random", true);
-        p.allow_cli        = j.value("allow_cli", true);
-        p.allow_socket     = j.value("allow_socket", false);
-        return p;
-    }
-
-    nlohmann::json to_json() const {
-        return nlohmann::json{
-            {"allow_clocks", allow_clocks},
-            {"allow_filesystem", allow_filesystem},
-            {"allow_random", allow_random},
-            {"allow_cli", allow_cli},
-            {"allow_socket", allow_socket}
-        };
-    }
 };
+
+inline void from_json(const nlohmann::json& j, FuncExecutionPolicy& v) {
+    v.allow_clocks     = j.value("allow_clocks", true);
+    v.allow_filesystem = j.value("allow_filesystem", false);
+    v.allow_random     = j.value("allow_random", true);
+    v.allow_cli        = j.value("allow_cli", true);
+    v.allow_socket     = j.value("allow_socket", false);
+}
+
+inline void to_json(nlohmann::json& j, const FuncExecutionPolicy& v) {
+    j = nlohmann::json{
+        {"allow_clocks", v.allow_clocks},
+        {"allow_filesystem", v.allow_filesystem},
+        {"allow_random", v.allow_random},
+        {"allow_cli", v.allow_cli},
+        {"allow_socket", v.allow_socket}
+    };
+}
 
 struct FuncInitialValues {
     int init_clock = 0;
     int random_seed = 42;
-
-    static FuncInitialValues from_json(const nlohmann::json& j) {
-        FuncInitialValues v;
-        v.init_clock  = j.value("init_clock", 0);
-        v.random_seed = j.value("random_seed", 42);
-        return v;
-    }
-
-    nlohmann::json to_json() const {
-        return nlohmann::json{
-            {"init_clock", init_clock},
-            {"random_seed", random_seed}
-        };
-    }
 };
+
+inline void from_json(const nlohmann::json& j, FuncInitialValues& v) {
+    v.init_clock  = j.value("init_clock", 0);
+    v.random_seed = j.value("random_seed", 42);
+}
+
+inline void to_json(nlohmann::json& j, const FuncInitialValues& v) {
+    j = nlohmann::json{
+        {"init_clock", v.init_clock},
+        {"random_seed", v.random_seed}
+    };
+}
 
 struct WasmFuncInfo : public BasicFuncInfo {
     WasmFuncInfo() = default;
-
+   
     explicit WasmFuncInfo(const BasicFuncInfo& base)
       : BasicFuncInfo(base) {}
 
@@ -172,48 +160,34 @@ struct WasmFuncInfo : public BasicFuncInfo {
     FuncExecutionPolicy func_execution_policy;
 
     FuncInitialValues func_initial_values;
-
-    static WasmFuncInfo from_json(const nlohmann::json& j) {
-        BasicFuncInfo base = BasicFuncInfo::from_json(j);
-        WasmFuncInfo info(base);
-
-        info.func_binary_hash      = require_field<std::string>(j, "func_binary_hash");
-        info.fast_execution        = j.value("fast_execution", true);
-        info.func_binary_source    = FuncBinarySource::from_json(j.at("func_binary_source"));
-        info.func_input_event      = FuncInputEvent::from_json(j.at("func_input_event"));
-        info.func_output_event     = FuncOutputEvent::from_json(j.at("func_output_event"));
-        info.func_link_opt         = FuncLinkOpt::from_json(j.at("func_link_opt"));
-        info.func_execution_policy = FuncExecutionPolicy::from_json(j.at("func_execution_policy"));
-        info.func_initial_values   = FuncInitialValues::from_json(j.at("func_initial_values"));
-
-        return info;
-    }
-
-    static WasmFuncInfo from_json(const std::string& json_text) {
-        nlohmann::json j = nlohmann::json::parse(json_text);
-        if (j.is_string()) {
-            j = nlohmann::json::parse(j.get<std::string>());
-        }
-        return from_json(j);
-    }
-
-    nlohmann::json to_json() const {
-        nlohmann::json j = to_json_base();
-
-        j["func_binary_hash"] = func_binary_hash;
-        j["fast_execution"] = fast_execution;
-        j["func_binary_source"] = func_binary_source.to_json();
-
-        j["func_input_event"] = func_input_event.to_json();
-        j["func_output_event"] = func_output_event.to_json();
-
-        j["func_link_opt"] = func_link_opt.to_json();
-        j["func_execution_policy"] = func_execution_policy.to_json();
-
-        j["func_initial_values"] = func_initial_values.to_json();
-
-        return j;
-    }
 };
-} // namespace detersl::func
 
+inline void from_json(const nlohmann::json& j, WasmFuncInfo& v) {
+    j.get_to(static_cast<BasicFuncInfo&>(v));
+
+    v.func_binary_hash      = require_field<std::string>(j, "func_binary_hash");
+    v.fast_execution        = j.value("fast_execution", true);
+    v.func_binary_source    = j.contains("func_binary_source") ? j.at("func_binary_source").get<FuncBinarySource>() : FuncBinarySource();
+    v.func_input_event      = j.contains("func_input_event") ? j.at("func_input_event").get<FuncInputEvent>() : FuncInputEvent();
+    v.func_output_event     = j.contains("func_output_event") ? j.at("func_output_event").get<FuncOutputEvent>() : FuncOutputEvent();
+    v.func_link_opt         = j.contains("func_link_opt") ? j.at("func_link_opt").get<FuncLinkOpt>() : FuncLinkOpt();
+    v.func_execution_policy = j.contains("func_execution_policy") ? j.at("func_execution_policy").get<FuncExecutionPolicy>() : FuncExecutionPolicy();
+    v.func_initial_values   = j.contains("func_initial_values") ? j.at("func_initial_values").get<FuncInitialValues>() : FuncInitialValues();
+}
+
+inline void to_json(nlohmann::json& j, const WasmFuncInfo& v) {
+    j = nlohmann::json(static_cast<const BasicFuncInfo&>(v));
+
+    j["func_binary_hash"] = v.func_binary_hash;
+    j["fast_execution"] = v.fast_execution;
+    j["func_binary_source"] = v.func_binary_source;
+
+    j["func_input_event"] = v.func_input_event;
+    j["func_output_event"] = v.func_output_event;
+
+    j["func_link_opt"] = v.func_link_opt;
+    j["func_execution_policy"] = v.func_execution_policy;
+
+    j["func_initial_values"] = v.func_initial_values;
+}
+} // namespace detersl::func

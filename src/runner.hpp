@@ -13,7 +13,8 @@ namespace detersl {
         class Runner {
             public:
                 Runner(acquired_cown_span<detersl::types::Resource> rw_cown_arr,
-                    acquired_cown_span<const detersl::types::Resource> ro_cown_arr, detersl::func::BasicFuncInfo basic_func);
+                    acquired_cown_span<const detersl::types::Resource> ro_cown_arr,
+                    const detersl::func::BasicFuncInfo& basic_func);
 
                 virtual bool run() = 0;
 
@@ -26,8 +27,6 @@ namespace detersl {
 
                 std::unique_ptr<detersl::kv::ResourceStorage> storage;
 
-            protected:
-                detersl::func::BasicFuncInfo func_info_;
         };
     }
 }

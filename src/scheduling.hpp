@@ -19,13 +19,12 @@
 #include <mutex>
 #include <unordered_set>
 #include <functional>
-#include "metrics.hpp"
+#include "status.hpp"
 #include <deque>
 #include <vector>
 #include <fstream>
 #include "wasm-runner.hpp"
 #include "thread-safe-queue.hpp"
-#include "metrics.hpp"
 #include "utils.hpp"
 #include <nlohmann/json.hpp>
 
@@ -43,7 +42,7 @@ class Scheduling {
 
         bool register_workflow(const detersl::types::Workflow& workflow, std::string* err);
 
-        bool invoke_workflow(const detersl::types::InvokeDTO& request, const uint64_t& id, std::string* err);
+        bool invoke_workflow(detersl::fastjson::InvokeRequest request, const uint64_t& id, std::string* err);
 
         bool get_resource_async(
             const std::string& res_name,
@@ -55,9 +54,9 @@ class Scheduling {
         bool schedule_graph(Node* node,
                             detersl::types::WorkflowInvocation& invocation,
                             std::string* err);
-        
-        void schedule_commit_behaviour(detersl::types::WorkflowInvocation& invocation);
 
+        void schedule_commit_behaviour(detersl::types::WorkflowInvocation& invocation);
+        
         bool schedule_choice_node(const Node* node,
                                     detersl::types::WorkflowInvocation& invocation,
                                     cown_ptr<detersl::types::ChoiceControl> control,
@@ -69,7 +68,7 @@ class Scheduling {
                             const detersl::types::BranchGuard* guard,
                             std::string* err);
 
-        void schedule_function(detersl::func::WasmFuncInfo&& func_info,
+        void schedule_function(const detersl::func::WasmFuncInfo& func_info,
                                         detersl::types::WorkflowInvocation& invocation,
                                         const detersl::types::BranchGuard* guard);
         

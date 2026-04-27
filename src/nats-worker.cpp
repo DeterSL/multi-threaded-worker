@@ -2,8 +2,7 @@
 
 #include "nats_raii.hpp"
 #include "scheduling.hpp"
-#include "metrics.hpp"
-
+#include "status.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -61,6 +60,7 @@ struct Task {
   enum class Kind { RegisterWasm, RegisterWorkflow, GetResource, Invoke };
   Kind kind;
   json payload;
+  detersl::fastjson::InvokeRequest invoke_request;
   std::optional<uint64_t> id;
   std::string reply;
 };
@@ -71,7 +71,7 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
       .subject = envOr("SUBJECT", "detersl.worker"),
       .stream = envOr("STREAM", "DETERSL"),
       .durable = envOr("DURABLE", "detersl-mt-worker"),
-      .batch_size = std::max(1, envOrInt("BATCH_SIZE", 1000)),
+      .batch_size = std::max(1, envOrInt("BATCH_SIZE", 500)),
       .fetch_timeout_ms = std::max(1, envOrInt("FETCH_TIMEOUT_MS", 3)),
   };
 
@@ -112,9 +112,9 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
 
   const unsigned task_queue_capacity = static_cast<unsigned>(
       std::max(cfg.batch_size, envOrInt("INVOKE_QUEUE_CAPACITY", 100000)));
-  constexpr unsigned kMetricsQueueCapacity = 100000;
+  constexpr unsigned kMetricsQueueCapacity = 50000;
   atomic_queue::AtomicQueueB2<Task> task_queue(task_queue_capacity);
-  atomic_queue::AtomicQueueB2<detersl::metrics::InvocationMetrics> metrics_queue(kMetricsQueueCapacity);
+  atomic_queue::AtomicQueueB2<detersl::status::InvocationStatus> metrics_queue(kMetricsQueueCapacity);
 
   std::cout << "NATS worker queue capacity: task=" << task_queue_capacity
             << " metrics=" << kMetricsQueueCapacity << std::endl;
@@ -125,8 +125,8 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
     }
   };
 
-  detersl::metrics::set_completion_callback(
-      [&](detersl::metrics::InvocationMetrics* metrics) {
+  detersl::status::set_completion_callback(
+      [&](detersl::status::InvocationStatus* metrics) {
         while (!metrics_queue.try_push(*metrics)) {
           std::this_thread::yield();
         }
@@ -134,14 +134,14 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
       
   std::thread metrics_thread([&]() {
     while (true) {
-      detersl::metrics::InvocationMetrics ev;
+      detersl::status::InvocationStatus status;
 
-      if (!metrics_queue.try_pop(ev)) {
-        // std::this_thread::yield();
+      if (!metrics_queue.try_pop(status)) {
+        std::this_thread::yield();
         continue;
       }
 
-      const std::string bytes = ((json)ev).dump();
+      const std::string bytes = ((json)status).dump();
 
       natsStatus s = js_PublishAsync(conn.jetstream(),
                                      metrics_subject.c_str(),
@@ -197,7 +197,7 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
         json parsed = nlohmann::json::parse(data, data + len);
         json payload = parsed.contains("payload") ? parsed.at("payload") : parsed;
 
-        Task task{Task::Kind::Invoke, payload, std::nullopt, {}};
+        Task task{Task::Kind::Invoke, payload, {}, std::nullopt, {}};
         task.reply = natsMsg_GetReply(msg) ? natsMsg_GetReply(msg) : "";
 
         if (op == "register_wasm") {
@@ -224,53 +224,52 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
   });
 
   std::thread invoke_thread([&]() {
-    while (true) {
-      try {
-        Connection invoke_conn(cfg.url, "DeterSL JS Puller", 10000, 10, 1000);
-        PullSubscriber invoke_sub(invoke_conn.jetstream(), js_invoke, cfg.stream, cfg.durable + "-invoke");
+    try {
+      Connection invoke_conn(cfg.url, "DeterSL JS Puller", 10000, 10, 1000);
+      PullSubscriber invoke_sub(invoke_conn.jetstream(), js_invoke, cfg.stream, cfg.durable + "-invoke");
 
-        while (true) {
-          std::vector<Msg> js_msgs;
+      while (true) {
+        std::vector<Msg> js_msgs;
+        try {
+          js_msgs = invoke_sub.fetch(cfg.batch_size, cfg.fetch_timeout_ms);
+        } catch (const std::exception& e) {
+          std::cerr << "nats js fetch error: " << e.what() << std::endl;
+          continue;
+        }
+
+        for (auto& msg : js_msgs) {
           try {
-            js_msgs = invoke_sub.fetch(cfg.batch_size, cfg.fetch_timeout_ms);
-          } catch (const std::exception& e) {
-            std::cerr << "nats js fetch error: " << e.what() << std::endl;
-            continue;
-          }
-
-          for (auto& msg : js_msgs) {
-            try {
-              jsMsgMetaData* meta = nullptr;
-              if (natsMsg_GetMetaData(&meta, msg.m) != NATS_OK) {
-                std::cerr << "invoke metadata error" << std::endl;
-                msg.ack(invoke_sub.jsOptionsPtr());
-                continue;
-              }
-
-              uint64_t seq = meta->Sequence.Stream;
-              jsMsgMetaData_Destroy(meta);
-
-              const char* data = msg.data();
-              const size_t len = msg.size();
-              if (!data || len == 0) {
-                std::cerr << "invoke message empty" << std::endl;
-                msg.ack(invoke_sub.jsOptionsPtr());
-                continue;
-              }
-
-              json parsed = nlohmann::json::parse(data, data + len);
-              Task task{Task::Kind::Invoke, parsed, seq, {}};
-              enqueue_task(std::move(task));
+            jsMsgMetaData* meta = nullptr;
+            if (natsMsg_GetMetaData(&meta, msg.m) != NATS_OK) {
+              std::cerr << "invoke metadata error" << std::endl;
               msg.ack(invoke_sub.jsOptionsPtr());
-            } catch (const std::exception& e) {
-              std::cerr << "invoke handler error: " << e.what() << std::endl;
-              msg.ack(invoke_sub.jsOptionsPtr());
+              continue;
             }
+
+            uint64_t seq = meta->Sequence.Stream;
+            jsMsgMetaData_Destroy(meta);
+
+            const char* data = msg.data();
+            const size_t len = msg.size();
+            if (!data || len == 0) {
+              std::cerr << "invoke message empty" << std::endl;
+              msg.ack(invoke_sub.jsOptionsPtr());
+              continue;
+            }
+
+            detersl::fastjson::InvokeRequest request =
+                detersl::fastjson::parse_invoke_request(data, len);
+            Task task{Task::Kind::Invoke, {}, std::move(request), seq, {}};
+            enqueue_task(std::move(task));
+            msg.ack(invoke_sub.jsOptionsPtr());
+          } catch (const std::exception& e) {
+            std::cerr << "invoke handler error: " << e.what() << std::endl;
+            msg.ack(invoke_sub.jsOptionsPtr());
           }
         }
-      } catch (const std::exception& e) {
-        std::cerr << "invoke thread setup error: " << e.what() << std::endl;
       }
+    } catch (const std::exception& e) {
+      std::cerr << "invoke thread setup error: " << e.what() << std::endl;
     }
   });
 
@@ -289,14 +288,13 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
       switch (task.kind) {
         case Task::Kind::Invoke: {
           std::string err;
-          detersl::types::InvokeDTO request = task.payload.get<detersl::types::InvokeDTO>();
 
           if (wf_count >= delete_after_n_wf) {
             wf_count = 0;
             scheduling.cleanup_resources();
           }
 
-          if (scheduling.invoke_workflow(request, *task.id, &err)) {
+          if (scheduling.invoke_workflow(std::move(task.invoke_request), *task.id, &err)) {
             wf_count++;
           } else {
             std::cerr << "invoke failed: " << err << std::endl;

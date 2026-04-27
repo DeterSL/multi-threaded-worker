@@ -10,8 +10,7 @@
 #include <iostream>
 #include <unordered_set>
 #include "wasm-func.hpp"
-
-using json = nlohmann::json;
+#include "fast-json.hpp"
 
 namespace detersl::worker {
 
@@ -34,7 +33,7 @@ namespace detersl::worker {
     struct ChoiceEdge {
         std::string Variable;
         std::string Operand;
-        json Value; // nlohmann json to hold any
+        detersl::fastjson::Value Value;
         Node* Next{nullptr};
     };
 
@@ -52,6 +51,6 @@ namespace detersl::worker {
 
     Node* BuildFromWorkflow(const detersl::types::Workflow& request, std::string* err);
 
-    bool cmp(const json& actual, const std::string& operand, const json& rhs, bool* match);
-    bool cmpBytes(const detersl::types::Bytes& actual, const std::string& operand, const json& rhs, bool* match);
+    bool cmp(const detersl::fastjson::InputField& actual, const std::string& operand, const detersl::fastjson::Value& rhs, bool* match);
+    bool cmpBytes(const detersl::types::Bytes& actual, const std::string& operand, const detersl::fastjson::Value& rhs, bool* match);
 } // namespace detersl::worker

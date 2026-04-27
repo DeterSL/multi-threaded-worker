@@ -5,22 +5,20 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <functional>
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <cpp/when.h>
 #include <verona.h>
 #include "resource.hpp"
 #include <unordered_set>
-#include "metrics.hpp"
+#include "status.hpp"
+#include "fast-json.hpp"
 
 using namespace verona::rt;
 using namespace verona::cpp;
 
 using json = nlohmann::json;
-
-namespace detersl::metrics {
-    struct InvocationMetrics;
-}
 
 namespace detersl {
     namespace types {
@@ -84,8 +82,8 @@ namespace detersl {
             std::unordered_set<std::string> workflow_rw_resources;
             cown_ptr<detersl::types::Resource> invocation_cown;
             std::shared_ptr<std::atomic<bool>> failed = std::make_shared<std::atomic<bool>>(false);
-            std::shared_ptr<detersl::metrics::InvocationMetrics> metrics;
-            InvokeDTO request;
+            std::shared_ptr<detersl::status::InvocationStatus> status;
+            detersl::fastjson::InvokeRequest request;
         };
 
         struct WorkflowStatus {

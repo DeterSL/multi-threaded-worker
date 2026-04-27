@@ -26,10 +26,10 @@ bool parse_resource_placeholder(const std::string& placeholder,
 
 bool resolve_resources(const Node* node,
                               detersl::types::WorkflowInvocation& invocation,
-                              std::unordered_map<std::string, nlohmann::json>& resource_inputs,
+                              detersl::fastjson::ResourceInputs& resource_inputs,
                               std::vector<std::string>& resource_names,
                               std::unordered_set<std::string>* read_only,
-                              std::unordered_map<std::string, nlohmann::json>& value_inputs,
+                              detersl::fastjson::ValueInputs& value_inputs,
                               std::string* err,
                               bool allow_variadic); 
 
