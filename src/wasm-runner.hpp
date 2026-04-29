@@ -44,8 +44,9 @@ namespace detersl {
                     bool ok = true;
                     try{                    
                         worker_excutioner->execution_func(func_info_);
+                    } catch (const std::exception& e) {
+                        ok = false;
                     } catch (...) {
-                        std::cerr << "Unknown exception during WasmRunner of function " << func_info_.func_name << std::endl;
                         ok = false;
                     }
 

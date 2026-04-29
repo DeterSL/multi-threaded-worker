@@ -27,10 +27,6 @@ namespace detersl {
                     if (value == local_resources_.end())
                         return nullptr;
 
-                    if (!value->second || value->second->is_deleted()) {
-                        return nullptr;
-                    }
-
                     return value->second;
                 }
 

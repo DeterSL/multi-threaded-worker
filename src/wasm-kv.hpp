@@ -29,7 +29,7 @@ namespace detersl {
             rust::Slice<const uint8_t> get(rust::Str key) override {
                 std::string key_str(key.data(), key.size());
                 auto* resource = resource_storage_->get_resource(key_str);
-                if (!resource) {
+                if (!resource || !resource->readable()) {
                     return rust::Slice<const uint8_t>();
                 }
 

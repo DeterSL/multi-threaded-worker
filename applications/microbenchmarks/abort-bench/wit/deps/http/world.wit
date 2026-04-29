@@ -1,0 +1,6 @@
+package detersl:http-api@0.2.0; 
+
+world http-api {
+    import outgoing-handler;
+    include wasi:io/imports@0.2.6;
+}

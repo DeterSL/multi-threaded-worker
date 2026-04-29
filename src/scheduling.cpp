@@ -61,24 +61,28 @@ void Scheduling::schedule_function(const detersl::func::WasmFuncInfo& func_info,
     read_only_resources.size()
   };
 
-  auto run = [func_info = std::move(func_info), local_refs = std::move(local_ref_counts), can_abort, failed, this](auto rw_c, auto ro_c){
+  auto run = [func_info = std::move(func_info), local_refs = std::move(local_ref_counts), can_abort, failed, globals = invocation.workflow_rw_resources, this](auto rw_c, auto ro_c){
     detersl::runner::WasmRunner runner(rw_c, ro_c, func_info);
     
     bool ok = runner.run();
 
     if(!can_abort){
-      // commit global resources directly since workflow cannot abort
-      for(auto& res: local_refs){
-        if(func_info.read_only_resources.count(res.first)){
+      // In non-aborting mode, each function finalizes only its own write-set.
+      for(auto& res: func_info.resources){
+        if(func_info.read_only_resources.count(res)){
           //is read only resource
           continue;
         }
-        detersl::types::Resource* res_ptr = runner.storage->get_resource(res.first);
+        detersl::types::Resource* res_ptr = runner.storage->get_resource(res);
         if(res_ptr){
+          if(ok){
           res_ptr->commit_uncommitted();
-          if(res_ptr->is_deleted()){
-            // push to deleted resource queue for cleanup
-            deleted_resources_queue.push({res.first, res.second});
+          if(globals.count(res) && res_ptr->is_deleted()){
+            // push to deleted resource queue for cleanup 
+            deleted_resources_queue.push({res, local_refs.at(res)});
+          }
+          } else {
+            res_ptr->abort_uncommitted();
           }
         }
       }

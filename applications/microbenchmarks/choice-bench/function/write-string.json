@@ -1,0 +1,36 @@
+{
+  "func_name": "write-string",
+  "func_invocation_id": "00000000-0000-0000-0000-000000000007",
+  "fast_execution": true,
+  "func_binary_hash": "2dd3722f66c6b298749db0fab0c106977",
+  "func_binary_source": {
+    "type": "fs",
+    "path": "applications/hotel-reservation/function/write-string.wasm"
+  },
+  "func_input_event": {
+    "type": "data",
+    "data": "{}"
+  },
+  "func_output_event": {
+    "type": "default"
+  },
+  "func_link_opt": {
+    "link_clocks": true,
+    "link_filesystem": true,
+    "link_random": true,
+    "link_cli": true,
+    "link_io": true,
+    "link_socket": true
+  },
+  "func_execution_policy": {
+    "allow_clocks": true,
+    "allow_filesystem": false,
+    "allow_random": true,
+    "allow_cli": true,
+    "allow_socket": false
+  },
+  "func_initial_values": {
+    "init_clock": 0,
+    "random_seed": 42
+  }
+}

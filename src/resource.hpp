@@ -92,6 +92,16 @@ namespace detersl {
                     return committed_deleted_;
                 }
 
+                bool readable() const {
+                    if (uncommitted_deleted_) {
+                        return false;
+                    }
+                    if (uncommitted_.has_value()) {
+                        return true;
+                    }
+                    return !committed_deleted_;
+                }
+
             private:
                 detersl::types::Bytes committed_;
                 std::optional<detersl::types::Bytes> uncommitted_;
