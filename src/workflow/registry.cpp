@@ -1,4 +1,4 @@
-#include "registry.hpp"
+#include "workflow/registry.hpp"
 
 namespace detersl::worker {
 

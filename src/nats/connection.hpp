@@ -1,10 +1,8 @@
-// src/nats_raii.hpp
 #pragma once
-#include <string>
+
 #include <stdexcept>
+#include <string>
 #include <vector>
-#include <memory>
-#include <chrono>
 
 extern "C" {
 #include <nats/nats.h>

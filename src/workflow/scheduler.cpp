@@ -1,11 +1,15 @@
-#include "scheduling.hpp"
-#include "status.hpp"
+#include "workflow/scheduler.hpp"
+
+#include "execution/wasm/wasm_runner.hpp"
+#include "workflow/resource_bindings.hpp"
 
 #include <deque>
 #include <iostream>
 #include <utility>
 
 namespace detersl::worker {
+
+using namespace verona::cpp;
 
 Scheduling::Scheduling(const WorkflowRegistry& workflows) : workflows_(workflows) {}
 

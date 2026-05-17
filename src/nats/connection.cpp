@@ -1,8 +1,6 @@
-// src/nats_raii.cpp
-#include "nats_raii.hpp"
+#include "nats/connection.hpp"
+
 #include <cstring>
-#include <iostream>
-#include <chrono>
 
 namespace detersl::nats {
 

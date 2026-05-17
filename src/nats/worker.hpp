@@ -1,6 +1,7 @@
 #pragma once
-#include "registrar.hpp"
-#include "scheduling.hpp"
+
+#include "workflow/registrar.hpp"
+#include "workflow/scheduler.hpp"
 
 namespace detersl::nats {
 

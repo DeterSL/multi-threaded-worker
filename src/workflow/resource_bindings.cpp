@@ -1,6 +1,10 @@
-#include "utils.hpp"
+#include "workflow/resource_bindings.hpp"
+
+#include <algorithm>
+#include <cctype>
 
 using namespace detersl::worker;
+using namespace verona::cpp;
 
 namespace detersl::utils {
 

@@ -3,8 +3,8 @@
 #include <nlohmann/json.hpp>
 
 #include "ffi.rs.h"
-#include "registry.hpp"
-#include "types.hpp"
+#include "workflow/model/workflow.hpp"
+#include "workflow/registry.hpp"
 
 namespace detersl::worker {
 

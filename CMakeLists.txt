@@ -101,15 +101,15 @@ target_link_libraries(detersl_common INTERFACE
 # ------------------------------------------------------------
 
 add_library(detersl_worker_core STATIC
-    src/runner.cpp
-    src/registry.cpp
-    src/registrar.cpp
-    src/scheduling.cpp
-    src/graph.cpp
-    src/status.cpp
-    src/utils.cpp
-    src/nats_raii.cpp
-    src/nats-worker.cpp
+    src/execution/runner.cpp
+    src/workflow/registry.cpp
+    src/workflow/registrar.cpp
+    src/workflow/scheduler.cpp
+    src/workflow/graph.cpp
+    src/workflow/status.cpp
+    src/workflow/resource_bindings.cpp
+    src/nats/connection.cpp
+    src/nats/worker.cpp
 )
 
 add_dependencies(detersl_worker_core detersl_rust)

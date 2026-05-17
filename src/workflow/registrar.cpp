@@ -1,10 +1,9 @@
-#include "registrar.hpp"
+#include "workflow/registrar.hpp"
 
 #include <chrono>
 #include <iostream>
-#include <utility>
 
-#include "wasm-kv.hpp"
+#include "execution/wasm/wasm_kv.hpp"
 
 extern const rust::Box<DeterSLEngine> engine;
 

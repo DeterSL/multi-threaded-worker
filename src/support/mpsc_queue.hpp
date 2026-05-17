@@ -1,4 +1,7 @@
+#pragma once
+
 #include <atomic>
+#include <mutex>
 #include <queue>
 
 namespace detersl::worker {

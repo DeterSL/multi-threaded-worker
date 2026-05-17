@@ -1,11 +1,10 @@
 #pragma once
 
-#include "kv.hpp"
-#include "kv_api.h"
 #include "ffi.rs.h"
-#include "bytes.hpp"
-#include "resource.hpp"
 #include <memory>
+
+#include "kv_api.h"
+#include "storage/kv.hpp"
 
 namespace detersl {
     namespace kv {

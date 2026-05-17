@@ -5,7 +5,7 @@
 #include <iostream>
 #include <optional>
 
-#include "bytes.hpp"
+#include "storage/bytes.hpp"
 #include "ffi.rs.h"
 
 namespace detersl {

@@ -4,8 +4,7 @@
 #include <stdexcept>
 #include <nlohmann/json.hpp>
 
-#include "func.hpp"
-#include "types.hpp"
+#include "execution/function.hpp"
 
 namespace detersl::func {
 

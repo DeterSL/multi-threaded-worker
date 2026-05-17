@@ -1,17 +1,17 @@
 #pragma once
-#include "types.hpp"
-#include "bytes.hpp"
+
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
-#include <optional>
-#include <map>
-#include <memory>
-#include <algorithm>
-#include <cmath>
-#include <iostream>
-#include <unordered_set>
-#include "wasm-func.hpp"
-#include "fast-json.hpp"
+
+#include "storage/bytes.hpp"
+#include "support/fast_json.hpp"
+#include "workflow/model/workflow.hpp"
+
+namespace detersl::func {
+struct WasmFuncInfo;
+}
 
 namespace detersl::worker {
 

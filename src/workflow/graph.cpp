@@ -1,12 +1,11 @@
-// src/worker/graph.cpp
-#include "graph.hpp"
+// src/workflow/graph.cpp
+#include "workflow/graph.hpp"
+
+#include "workflow/resource_bindings.hpp"
+
 #include <algorithm>
-#include <cmath>
-#include <cstdlib>
+#include <cctype>
 #include <cstring>
-#include <functional>
-#include <iostream>
-#include "utils.hpp"
 
 namespace detersl::worker {
 

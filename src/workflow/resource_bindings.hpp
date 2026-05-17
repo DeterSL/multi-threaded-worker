@@ -4,18 +4,18 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include "graph.hpp"
-#include "types.hpp"
 
-using namespace detersl::worker;
+#include "support/fast_json.hpp"
+#include "workflow/graph.hpp"
+#include "workflow/model/invocation.hpp"
 
 namespace detersl::utils {
 
-bool get_task_binding(Node* node, 
+bool get_task_binding(detersl::worker::Node* node,
                 std::unordered_map<std::string, std::string> resources,
                 std::string* err);
     
-bool get_choice_bindings(Node* node, std::string* err);
+bool get_choice_bindings(detersl::worker::Node* node, std::string* err);
     
 bool parse_resource_placeholder(const std::string& placeholder,
                                        bool &immediate_val,
@@ -24,7 +24,7 @@ bool parse_resource_placeholder(const std::string& placeholder,
                                        bool &is_local,
                                        std::string* err); 
 
-bool resolve_resources(const Node* node,
+bool resolve_resources(const detersl::worker::Node* node,
                               detersl::types::WorkflowInvocation& invocation,
                               detersl::fastjson::ResourceInputs& resource_inputs,
                               std::vector<std::string>& resource_names,

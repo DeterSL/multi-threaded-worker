@@ -1,19 +1,19 @@
 #pragma once
-#include <memory>
-#include "func.hpp"
-#include "kv.hpp"
-#include <verona.h>
-#include <cpp/when.h>
 
-using namespace verona::rt;
-using namespace verona::cpp;
+#include <memory>
+
+#include <cpp/when.h>
+#include <verona.h>
+
+#include "execution/function.hpp"
+#include "storage/kv.hpp"
 
 namespace detersl {
     namespace runner {
         class Runner {
             public:
-                Runner(acquired_cown_span<detersl::types::Resource> rw_cown_arr,
-                    acquired_cown_span<const detersl::types::Resource> ro_cown_arr,
+                Runner(verona::cpp::acquired_cown_span<detersl::types::Resource> rw_cown_arr,
+                    verona::cpp::acquired_cown_span<const detersl::types::Resource> ro_cown_arr,
                     const detersl::func::BasicFuncInfo& basic_func);
 
                 virtual bool run() = 0;

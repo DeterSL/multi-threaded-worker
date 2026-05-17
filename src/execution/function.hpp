@@ -1,10 +1,9 @@
 #pragma once
 
-#include <string>
-#include <vector>
-#include <stdexcept>
-#include <nlohmann/json.hpp>
 #include <unordered_set>
+#include <vector>
+
+#include <nlohmann/json.hpp>
 
 namespace detersl::func {
 

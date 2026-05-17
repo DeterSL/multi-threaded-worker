@@ -1,17 +1,13 @@
-#include "runner.hpp"
-#include "func.hpp"
-#include "kv.hpp"
+#include "execution/runner.hpp"
+
 #include <cassert>
 #include <iostream>
 #include <memory>
 
-using namespace verona::rt;
-using namespace verona::cpp;
-
 namespace detersl::runner {
 
-    Runner::Runner(acquired_cown_span<detersl::types::Resource> rw_cown_arr,
-            acquired_cown_span<const detersl::types::Resource> ro_cown_arr,
+    Runner::Runner(verona::cpp::acquired_cown_span<detersl::types::Resource> rw_cown_arr,
+            verona::cpp::acquired_cown_span<const detersl::types::Resource> ro_cown_arr,
             const detersl::func::BasicFuncInfo& basic_func) {
         std::unordered_map<std::string, detersl::types::Resource*> local_resources;
         size_t ro_index = 0;

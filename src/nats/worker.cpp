@@ -1,19 +1,13 @@
-#include "nats-worker.hpp"
+#include "nats/worker.hpp"
 
-#include "nats_raii.hpp"
-#include "scheduling.hpp"
-#include "status.hpp"
-#include <pal/cpu.h>
+#include "nats/connection.hpp"
+
 #include <algorithm>
-#include <cerrno>
-#include <cstring>
 #include <cstdlib>
-#include <future>
 #include <iostream>
 #include <optional>
 #include <string>
 #include <thread>
-#include <unordered_set>
 #include <vector>
 
 #include <atomic_queue/atomic_queue.h>

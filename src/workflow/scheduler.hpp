@@ -1,36 +1,19 @@
 #pragma once
 
-#include "func.hpp"
-#include "graph.hpp"
-#include "registry.hpp"
-#include "resource.hpp"
-#include "runner.hpp"
-#include "types.hpp"
-#include <cpp/when.h>
 #include "cpp/cown.h"
-#include <unordered_map>
-#include <wasm-func.hpp>
-#include "rust/cxx.h"
-#include <future>
-#include <cstdint>
-#include <dlfcn.h>
-#include <cctype>
-#include <atomic>
-#include <memory>
-#include <mutex>
-#include <unordered_set>
-#include <functional>
-#include "status.hpp"
-#include <deque>
-#include <vector>
-#include <fstream>
-#include "wasm-runner.hpp"
-#include "thread-safe-queue.hpp"
-#include "utils.hpp"
-#include <nlohmann/json.hpp>
 
-using namespace verona::rt;
-using namespace verona::cpp;
+#include <functional>
+#include <string>
+#include <unordered_map>
+#include <utility>
+
+#include "execution/wasm/wasm_function.hpp"
+#include "storage/resource.hpp"
+#include "support/fast_json.hpp"
+#include "support/mpsc_queue.hpp"
+#include "workflow/graph.hpp"
+#include "workflow/model/invocation.hpp"
+#include "workflow/registry.hpp"
 
 namespace detersl::worker {
     
@@ -61,7 +44,7 @@ class Scheduling {
         
         bool schedule_choice_node(const Node* node,
                                     detersl::types::WorkflowInvocation& invocation,
-                                    cown_ptr<detersl::types::ChoiceControl> control,
+                                    verona::cpp::cown_ptr<detersl::types::ChoiceControl> control,
                                     const detersl::types::BranchGuard* guard,
                                     std::string* err);
         
@@ -75,7 +58,7 @@ class Scheduling {
                                         const detersl::types::BranchGuard* guard);
         
         const WorkflowRegistry& workflows_;
-        std::unordered_map<std::string, std::pair<cown_ptr<detersl::types::Resource>, uint64_t>> resource_map;
+        std::unordered_map<std::string, std::pair<verona::cpp::cown_ptr<detersl::types::Resource>, uint64_t>> resource_map;
         BasicMPSCQueue<std::pair<std::string, uint64_t>> deleted_resources_queue;
 };
 

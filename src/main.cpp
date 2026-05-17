@@ -1,16 +1,19 @@
 #include <iostream>
-#include "ffi.rs.h"
-#include "nats-worker.hpp"
+
 #include <cpp/when.h>
-#include "cpp/cown.h"
-#include "registrar.hpp"
-#include "registry.hpp"
 #include <string>
+
+#include "cpp/cown.h"
+#include "ffi.rs.h"
+#include "nats/worker.hpp"
+#include "workflow/registrar.hpp"
+#include "workflow/registry.hpp"
 
 using namespace verona::rt;
 using namespace verona::cpp;
 
-const rust::Box<DeterSLEngine> engine = new_detersl_engine(std::string("./config.json"));
+extern const rust::Box<DeterSLEngine> engine =
+    new_detersl_engine(std::string("./config.json"));
 
 int main(int argc, char **argv)
 {

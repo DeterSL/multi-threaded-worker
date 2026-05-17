@@ -1,9 +1,9 @@
 #pragma once
-#include <chrono>
-#include <mutex>
 #include <atomic>
-#include <memory>
+#include <cstdint>
 #include <functional>
+#include <memory>
+
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
