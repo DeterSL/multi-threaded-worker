@@ -5,6 +5,7 @@
 #include <vector>
 #include <optional>
 #include <map>
+#include <memory>
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -34,7 +35,7 @@ namespace detersl::worker {
         std::string Variable;
         std::string Operand;
         detersl::fastjson::Value Value;
-        Node* Next{nullptr};
+        std::unique_ptr<Node> Next;
     };
 
     struct Node {
@@ -42,14 +43,15 @@ namespace detersl::worker {
         std::string StateID;
         NodeType Type;
         std::string FuncID;
+        std::shared_ptr<const detersl::func::WasmFuncInfo> Func;
         std::vector<ResourceBinding> resource_bindings;
         bool End{false};
-        Node* Next{nullptr};
+        std::unique_ptr<Node> Next;
         std::vector<ChoiceEdge> Choices;
         std::string ID() const;
     };
 
-    Node* BuildFromWorkflow(const detersl::types::Workflow& request, std::string* err);
+    std::unique_ptr<Node> BuildFromWorkflow(const detersl::types::Workflow& request, std::string* err);
 
     bool cmp(const detersl::fastjson::InputField& actual, const std::string& operand, const detersl::fastjson::Value& rhs, bool* match);
     bool cmpBytes(const detersl::types::Bytes& actual, const std::string& operand, const detersl::fastjson::Value& rhs, bool* match);

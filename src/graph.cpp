@@ -44,32 +44,28 @@ static std::string lower(const std::string& s) {
         return false;
     }
 
-    static Node* buildSequence(const std::string& workflow_id,
-                               const std::vector<State>& tasks,
-                               std::string* err) {
+    static std::unique_ptr<Node> buildSequence(const std::string& workflow_id,
+                                               const std::vector<State>& tasks,
+                                               std::string* err) {
         if (tasks.empty()) return nullptr;
 
-        Node* next = nullptr;
+        std::unique_ptr<Node> next;
         for (size_t idx = tasks.size(); idx-- > 0;) {
             const State& st = tasks[idx];
             const std::string state_id = std::to_string(idx);
 
-            Node* n = new Node{
-                .WorkflowID = workflow_id,
-                .StateID = state_id,
-                .Type = getNodeType(st.Type),
-                .FuncID = st.FuncID,
-                .End = false,
-                .Next = nullptr,
-                .Choices = {},
-            };
+            auto n = std::make_unique<Node>();
+            n->WorkflowID = workflow_id;
+            n->StateID = state_id;
+            n->Type = getNodeType(st.Type);
+            n->FuncID = st.FuncID;
 
             if (n->Type == NodeType::Task) {
-                if(!detersl::utils::get_task_binding(n, st.Resources, err)){
+                if(!detersl::utils::get_task_binding(n.get(), st.Resources, err)){
                     return nullptr;
                 }
-                n->Next = next;
-                n->End = (next == nullptr);
+                n->Next = std::move(next);
+                n->End = (n->Next == nullptr);
             } else if (n->Type == NodeType::Choice) {
                 if (idx + 1 != tasks.size()) {
                     if (err) *err = "choice at index " + state_id + " must be the last state in the list";
@@ -92,10 +88,10 @@ static std::string lower(const std::string& s) {
                         if (err) *err = "choice at index " + state_id + ": " + terr;
                         return nullptr;
                     }
-                    Node* child = buildSequence(workflow_id, c.tasks, err);
+                    std::unique_ptr<Node> child = buildSequence(workflow_id, c.tasks, err);
                     if (!child && err && !err->empty()) return nullptr;
 
-                    edges.push_back(ChoiceEdge{c.Variable, op, val, child});
+                    edges.push_back(ChoiceEdge{c.Variable, op, val, std::move(child)});
                 }
                 if (!st.Default.empty()) {
                     // Default branch ends with no additional tasks.
@@ -113,7 +109,7 @@ static std::string lower(const std::string& s) {
                     return idi < idj;
                 });
                 n->Choices = std::move(edges);
-                if(!detersl::utils::get_choice_bindings(n, err)){
+                if(!detersl::utils::get_choice_bindings(n.get(), err)){
                     return nullptr;
                 }
             } else {
@@ -121,12 +117,12 @@ static std::string lower(const std::string& s) {
                 return nullptr;
             }
 
-            next = n;
+            next = std::move(n);
         }
         return next;
     }
 
-    Node* BuildFromWorkflow(const Workflow& workflow, std::string* err) {
+    std::unique_ptr<Node> BuildFromWorkflow(const Workflow& workflow, std::string* err) {
         std::string local_err;
         std::string* errp = err ? err : &local_err;
         errp->clear();
@@ -136,7 +132,7 @@ static std::string lower(const std::string& s) {
             return nullptr;
         }
 
-        Node* root = buildSequence(workflow.ID, workflow.tasks, errp);
+        std::unique_ptr<Node> root = buildSequence(workflow.ID, workflow.tasks, errp);
         if (!root) {
             if (!errp->empty()) {
                 if (err) *err = "failed to build graph: " + *errp;

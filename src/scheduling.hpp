@@ -2,6 +2,7 @@
 
 #include "func.hpp"
 #include "graph.hpp"
+#include "registry.hpp"
 #include "resource.hpp"
 #include "runner.hpp"
 #include "types.hpp"
@@ -36,13 +37,14 @@ namespace detersl::worker {
 class Scheduling {
 
     public:
+        explicit Scheduling(const WorkflowRegistry& workflows);
+
         void cleanup_resources();
 
-        bool register_wasm_function(const nlohmann::json& j, std::string* err);
-
-        bool register_workflow(const detersl::types::Workflow& workflow, std::string* err);
-
-        bool invoke_workflow(detersl::fastjson::InvokeRequest request, const uint64_t& id, std::string* err);
+        bool invoke_workflow(
+            detersl::fastjson::InvokeRequest request,
+            const uint64_t& id,
+            std::string* err);
 
         bool get_resource_async(
             const std::string& res_name,
@@ -51,7 +53,7 @@ class Scheduling {
         bool get_workflow_status(const std::string& request_id, detersl::types::WorkflowStatus* status);
 
     private:
-        bool schedule_graph(Node* node,
+        bool schedule_graph(const Node* node,
                             detersl::types::WorkflowInvocation& invocation,
                             std::string* err);
 
@@ -63,7 +65,7 @@ class Scheduling {
                                     const detersl::types::BranchGuard* guard,
                                     std::string* err);
         
-        bool run_task_node(Node* node,
+        bool run_task_node(const Node* node,
                             detersl::types::WorkflowInvocation& invocation,
                             const detersl::types::BranchGuard* guard,
                             std::string* err);
@@ -72,11 +74,9 @@ class Scheduling {
                                         detersl::types::WorkflowInvocation& invocation,
                                         const detersl::types::BranchGuard* guard);
         
+        const WorkflowRegistry& workflows_;
         std::unordered_map<std::string, std::pair<cown_ptr<detersl::types::Resource>, uint64_t>> resource_map;
         BasicMPSCQueue<std::pair<std::string, uint64_t>> deleted_resources_queue;
-        std::unordered_map<std::string, detersl::func::WasmFuncInfo> wasm_func_registry;
-        std::unordered_map<std::string, Node*> workflow_registry;
-        int next_workflow_request_id = 1;
 };
 
 } // namespace detersl::worker

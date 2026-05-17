@@ -3,8 +3,10 @@
 #include "nats_raii.hpp"
 #include "scheduling.hpp"
 #include "status.hpp"
+#include <pal/cpu.h>
 #include <algorithm>
-#include <chrono>
+#include <cerrno>
+#include <cstring>
 #include <cstdlib>
 #include <future>
 #include <iostream>
@@ -57,7 +59,7 @@ json error_resp(const std::string& msg) {
 }
 
 struct Task {
-  enum class Kind { RegisterWasm, RegisterWorkflow, GetResource, Invoke };
+  enum class Kind { GetResource, Invoke };
   Kind kind;
   json payload;
   detersl::fastjson::InvokeRequest invoke_request;
@@ -65,7 +67,10 @@ struct Task {
   std::string reply;
 };
 
-void run_nats_worker(detersl::worker::Scheduling& scheduling) {
+void run_nats_worker(detersl::worker::Scheduling& scheduling,
+                     detersl::worker::FunctionRegistrar& function_registrar,
+                     detersl::worker::WorkflowRegistrar& workflow_registrar) {
+
   NatsConfig cfg{
       .url = envOr("NATSURL", NATS_DEFAULT_URL),
       .subject = envOr("SUBJECT", "detersl.worker"),
@@ -76,12 +81,13 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
   };
 
   const std::string js_invoke = cfg.subject + ".invoke";
-  const std::string js_invoke_batch = cfg.subject + ".invoke_batch";
   const std::string core_subject = envOr("CORE_SUBJECT", cfg.subject + ".core");
   const std::string core_prefix = core_subject + ".";
   const std::string core_wildcard = core_subject + ".*";
-  const std::string metrics_subject = envOr("METRICS_SUBJECT", cfg.subject + ".metrics");
-  const std::string metrics_stream = envOr("METRICS_STREAM", cfg.stream + "_METRICS");
+  const std::string status_subject =
+      envOr("STATUS_SUBJECT", envOr("METRICS_SUBJECT", cfg.subject + ".status"));
+  const std::string status_stream =
+      envOr("STATUS_STREAM", envOr("METRICS_STREAM", cfg.stream + "_STATUS"));
   const int metrics_batch_max = envOrInt("METRICS_BATCH_MAX", 256);
   const int metrics_flush_ms = envOrInt("METRICS_FLUSH_MS", 15);
 
@@ -92,10 +98,10 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
             << " batch=" << cfg.batch_size
             << " fetch_timeout_ms=" << cfg.fetch_timeout_ms << std::endl;
 
-  std::cout << "NATS worker JetStream subjects: " << js_invoke << ", " << js_invoke_batch << std::endl;
+  std::cout << "NATS worker JetStream subjects: " << js_invoke << std::endl;
   std::cout << "NATS worker core subjects: " << core_wildcard << std::endl;
-  std::cout << "NATS worker metrics subject: " << metrics_subject
-            << " metrics stream=" << metrics_stream
+  std::cout << "NATS worker status subject: " << status_subject
+            << " status stream=" << status_stream
             << " batch=" << metrics_batch_max
             << " flush_ms=" << metrics_flush_ms << std::endl;
 
@@ -103,11 +109,11 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
 
   StreamManager::ensureStream(conn.jetstream(),
                               cfg.stream,
-                              {js_invoke, js_invoke_batch},
+                              {js_invoke},
                               true);
   StreamManager::ensureStream(conn.jetstream(),
-                              metrics_stream,
-                              {metrics_subject},
+                              status_stream,
+                              {status_subject},
                               true);
 
   const unsigned task_queue_capacity = static_cast<unsigned>(
@@ -126,13 +132,15 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
   };
 
   detersl::status::set_completion_callback(
-      [&](detersl::status::InvocationStatus* metrics) {
-        while (!metrics_queue.try_push(*metrics)) {
+      [&](detersl::status::InvocationStatus* status) {
+        while (!metrics_queue.try_push(*status)) {
           std::this_thread::yield();
         }
   });
-      
+  const int delete_after_n_wf = 1000;
+
   std::thread metrics_thread([&]() {
+
     while (true) {
       detersl::status::InvocationStatus status;
 
@@ -142,19 +150,19 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
       }
 
       const std::string bytes = ((json)status).dump();
-
       natsStatus s = js_PublishAsync(conn.jetstream(),
-                                     metrics_subject.c_str(),
+                                     status_subject.c_str(),
                                      bytes.data(),
                                      static_cast<int>(bytes.size()),
                                      nullptr);
       if (s != NATS_OK) {
-        std::cerr << "metrics js publish failed: " << natsStatus_GetText(s) << std::endl;
+        std::cerr << "status js publish failed: " << natsStatus_GetText(s) << std::endl;
       }
     }
   });
 
   std::thread core_thread([&]() {
+
     natsSubscription* core_sub = nullptr;
     natsConnection* nc = conn.handle();
     if (natsConnection_SubscribeSync(&core_sub, nc, core_wildcard.c_str()) != NATS_OK) {
@@ -197,23 +205,34 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
         json parsed = nlohmann::json::parse(data, data + len);
         json payload = parsed.contains("payload") ? parsed.at("payload") : parsed;
 
-        Task task{Task::Kind::Invoke, payload, {}, std::nullopt, {}};
+        Task task{Task::Kind::GetResource, payload, {}, std::nullopt, {}};
         task.reply = natsMsg_GetReply(msg) ? natsMsg_GetReply(msg) : "";
 
         if (op == "register_wasm") {
-          task.kind = Task::Kind::RegisterWasm;
+          std::string err;
+          if (function_registrar.register_wasm_function(payload, &err)) {
+            response = json{{"status", "ok"}};
+          } else {
+            response = error_resp(err);
+          }
+          publish_reply(conn, natsMsg_GetReply(msg), response);
         } else if (op == "register_workflow") {
-          task.kind = Task::Kind::RegisterWorkflow;
+          std::string err;
+          detersl::types::Workflow workflow = payload.get<detersl::types::Workflow>();
+          if (workflow_registrar.register_workflow(workflow, &err)) {
+            response = json{{"status", "ok"}};
+          } else {
+            response = error_resp(err);
+          }
+          publish_reply(conn, natsMsg_GetReply(msg), response);
         } else if (op == "get_resource") {
-          task.kind = Task::Kind::GetResource;
+          enqueue_task(std::move(task));
         } else {
           response = error_resp("unsupported op: " + op);
           publish_reply(conn, natsMsg_GetReply(msg), response);
           natsMsg_Destroy(msg);
           continue;
         }
-
-        enqueue_task(std::move(task));
       } catch (const std::exception& e) {
         response = error_resp(std::string("handler error: ") + e.what());
         publish_reply(conn, natsMsg_GetReply(msg), response);
@@ -259,7 +278,12 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
 
             detersl::fastjson::InvokeRequest request =
                 detersl::fastjson::parse_invoke_request(data, len);
-            Task task{Task::Kind::Invoke, {}, std::move(request), seq, {}};
+            Task task{
+                Task::Kind::Invoke,
+                {},
+                std::move(request),
+                seq,
+                {}};
             enqueue_task(std::move(task));
             msg.ack(invoke_sub.jsOptionsPtr());
           } catch (const std::exception& e) {
@@ -273,13 +297,10 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
     }
   });
 
-  const int delete_after_n_wf = 100;
   int wf_count = 0;
-
   while (true) {
     Task task;
     if (!task_queue.try_pop(task)) {
-      // std::this_thread::yield();
       continue;
     }
 
@@ -298,31 +319,7 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling) {
             wf_count++;
           } else {
             std::cerr << "invoke failed: " << err << std::endl;
-            break;
           }
-          break;
-        }
-
-        case Task::Kind::RegisterWasm: {
-          std::string err;
-          if (scheduling.register_wasm_function(task.payload, &err)) {
-            response = json{{"status", "ok"}};
-          } else {
-            response = error_resp(err);
-          }
-          publish_reply(conn, task.reply.c_str(), response);
-          break;
-        }
-
-        case Task::Kind::RegisterWorkflow: {
-          std::string err;
-          detersl::types::Workflow workflow = task.payload.get<detersl::types::Workflow>();
-          if (scheduling.register_workflow(workflow, &err)) {
-            response = json{{"status", "ok"}};
-          } else {
-            response = error_resp(err);
-          }
-          publish_reply(conn, task.reply.c_str(), response);
           break;
         }
 

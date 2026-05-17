@@ -42,7 +42,7 @@ class AsyncDeterSLClient:
         core_subject: str | None = None,
         invoke_subject: str | None = None,
         metrics_subject: str | None = None,
-        metrics_durable: str = "detersl-metrics",
+        metrics_durable: str = "detersl-status",
         publish_async_max_pending: int = 50000,
         registration_timeout_s: float | None = None,
         registration_max_retries: int | None = None,
@@ -55,7 +55,12 @@ class AsyncDeterSLClient:
         self.url = url or _default_nats_url()
         self.core_subject = core_subject or os.environ.get("CORE_SUBJECT") or f"{base}.core"
         self.invoke_subject = invoke_subject or f"{base}.invoke"
-        self.metrics_subject = metrics_subject or os.environ.get("METRICS_SUBJECT") or f"{base}.metrics"
+        self.metrics_subject = (
+            metrics_subject
+            or os.environ.get("STATUS_SUBJECT")
+            or os.environ.get("METRICS_SUBJECT")
+            or f"{base}.status"
+        )
         self.metrics_durable = metrics_durable
         self.publish_async_max_pending = publish_async_max_pending
         self.registration_timeout_s = (

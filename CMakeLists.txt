@@ -102,6 +102,8 @@ target_link_libraries(detersl_common INTERFACE
 
 add_library(detersl_worker_core STATIC
     src/runner.cpp
+    src/registry.cpp
+    src/registrar.cpp
     src/scheduling.cpp
     src/graph.cpp
     src/status.cpp

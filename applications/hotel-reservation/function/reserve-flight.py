@@ -6,7 +6,9 @@ from wit_world.exports.func_handler import Event, Output
 from wit_world.imports.kv import *
 
 class NotEnoughSpace(Exception):
-    pass
+    def __init__(self, message):
+        self.message = message
+        super().__init__(self.message)
 
 class FuncHandler(BaseFuncHandler):
     def handle(self, event: Event) -> Output:
@@ -15,14 +17,20 @@ class FuncHandler(BaseFuncHandler):
             resources = data["resources"]
         except json.JSONDecodeError:
             data = {}
-        key = str(resources["flight_data"])
-        
-        flight_data = json.loads(get(key).decode())
 
-        flight_data["Cap"] -= 1
-        if flight_data["Cap"] < 0:
-            raise NotEnoughSpace(f"Not enough space: for flight: {key}")
+        try:
+            key = str(resources["flight_data"])
+            
+            flight_data = json.loads(get(key).decode())
+
+            flight_data["Cap"] -= 1
+            if flight_data["Cap"] < 0:
+                raise NotEnoughSpace(f"Not enough space: for flight: {key}")
+            
+            set(key, json.dumps(flight_data).encode())
+            data = {'success': True}
+        except Exception as e:
+            data = {'success': False, 'error': str(e)}
         
-        set(key, json.dumps(flight_data).encode())
-        return Output("success")
+        return Output(json.dumps(data))
      

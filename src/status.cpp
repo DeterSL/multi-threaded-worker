@@ -16,6 +16,6 @@ void InvocationStatus::complete(){
         std::chrono::system_clock::now()
     ).time_since_epoch().count();
   
-    completion_cb_(this);  
+    completion_cb_(this);
 }
 }

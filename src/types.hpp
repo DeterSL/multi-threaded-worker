@@ -12,6 +12,7 @@
 #include <verona.h>
 #include "resource.hpp"
 #include <unordered_set>
+#include <atomic>
 #include "status.hpp"
 #include "fast-json.hpp"
 
@@ -21,6 +22,10 @@ using namespace verona::cpp;
 using json = nlohmann::json;
 
 namespace detersl {
+    namespace worker {
+        struct Node;
+    }
+
     namespace types {
         struct Choice;
 
@@ -67,13 +72,12 @@ namespace detersl {
         };
 
         struct ChoiceControl {
-            bool decided = false;
-            size_t selected = 0;
+            int selected = -1;
         };
 
         struct BranchGuard {
             cown_ptr<ChoiceControl> control;
-            size_t edge_index;
+            int edge_index = -1;
         };
 
         struct WorkflowInvocation {
@@ -83,6 +87,7 @@ namespace detersl {
             cown_ptr<detersl::types::Resource> invocation_cown;
             std::shared_ptr<std::atomic<bool>> failed = std::make_shared<std::atomic<bool>>(false);
             std::shared_ptr<detersl::status::InvocationStatus> status;
+            std::shared_ptr<const detersl::worker::Node> workflow_root;
             detersl::fastjson::InvokeRequest request;
         };
 

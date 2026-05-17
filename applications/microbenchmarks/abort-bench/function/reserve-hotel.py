@@ -18,7 +18,7 @@ class FuncHandler(BaseFuncHandler):
             raise RuntimeError(f"Injected failure for hotel {key}")
         hotel_data["Cap"] -= 1
         if hotel_data["Cap"] < 0:
-            raise RuntimeError(f"Not enough space for hotel {key}")
+            return Output(json.dumps({"success": False}))
         
         set(key, json.dumps(hotel_data).encode())
      

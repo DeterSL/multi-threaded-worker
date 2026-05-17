@@ -3,6 +3,8 @@
 #include "nats-worker.hpp"
 #include <cpp/when.h>
 #include "cpp/cown.h"
+#include "registrar.hpp"
+#include "registry.hpp"
 #include <string>
 
 using namespace verona::rt;
@@ -27,11 +29,19 @@ int main(int argc, char **argv)
 
   sched.init(num_threads);
 
-  detersl::worker::Scheduling scheduling;
+  detersl::worker::FunctionRegistry function_registry;
+  detersl::worker::WorkflowRegistry workflow_registry;
+  detersl::worker::FunctionRegistrar function_registrar(function_registry);
+  detersl::worker::WorkflowRegistrar workflow_registrar(function_registry, workflow_registry);
+  detersl::worker::Scheduling scheduling(workflow_registry);
   // Schedule an external thread to play the role of the dispatcher
-  when() << [&scheduling](){
+  when() << [&scheduling, &function_registrar, &workflow_registrar](){
     Scheduler::add_external_event_source();
-    std::thread t(detersl::nats::run_nats_worker, std::ref(scheduling));
+    std::thread t(
+        detersl::nats::run_nats_worker,
+        std::ref(scheduling),
+        std::ref(function_registrar),
+        std::ref(workflow_registrar));
     t.detach();
   };
 

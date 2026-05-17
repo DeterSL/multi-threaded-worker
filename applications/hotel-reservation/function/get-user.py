@@ -13,14 +13,17 @@ class FuncHandler(BaseFuncHandler):
             values = data["values"]
         except json.JSONDecodeError:
             data = {}
-        
-        stored_password = get(str(resources["username"])).decode()
-        tentative = values["password"]
 
-        if stored_password == tentative:
-            data = {'success': True}
-        else:
-            data = {'success': False}
+        try:
+            stored_password = get(str(resources["username"])).decode()
+            tentative = values["password"]
 
+            if stored_password == tentative:
+                data = {'success': True}
+            else:
+                data = {'success': False}
+        except Exception as e:
+            data = {'success': False, 'error': str(e)}
+            
         output = Output(json.dumps(data))
         return output

@@ -1,6 +1,5 @@
 import argparse
 import asyncio
-import csv
 import json
 import math
 import multiprocessing
@@ -38,16 +37,29 @@ MESSAGES_PER_SECOND = int(sys.argv[3])
 SECONDS = int(sys.argv[4])
 WARMUP_SECONDS = int(sys.argv[5])
 FAILURE_RATE = float(sys.argv[6])
-NUM_HOTELS = 1000
-NUM_FLIGHTS = 1000
+NUM_HOTELS = 10000
+NUM_FLIGHTS = 10000
+TOTAL_THROUGHPUT = THREADS * MESSAGES_PER_SECOND
 
 def epoch_ms() -> int:
     return time.time_ns() // 1_000_000
 
 
-RUN_ID = f"run-{epoch_ms()}"
+def format_filename_number(value: float) -> str:
+    text = f"{value:.6f}".rstrip("0").rstrip(".")
+    if not text:
+        text = "0"
+    return text.replace(".", "_")
 
-CAPACITY = 1000
+
+RUN_ID = f"run-{epoch_ms()}"
+RUN_FILE_TAG = (
+    f"total_tput_{TOTAL_THROUGHPUT}_"
+    f"abort_{format_filename_number(FAILURE_RATE * 100.0)}pct_"
+    f"{RUN_ID}"
+)
+
+CAPACITY = 10000
 SEED = 230143093
 USER_ID = "benchmark-user"
 
@@ -312,7 +324,9 @@ def build_summary(records: list[dict], case: CaseConfig) -> dict:
         "case_name": case.name,
         "can_abort": case.can_abort,
         "run_id": RUN_ID,
+        "run_file_tag": RUN_FILE_TAG,
         "configured_failure_rate": FAILURE_RATE,
+        "configured_total_throughput": TOTAL_THROUGHPUT,
         "threads": THREADS,
         "messages_per_second": MESSAGES_PER_SECOND,
         "seconds": SECONDS,
@@ -387,30 +401,7 @@ def build_summary(records: list[dict], case: CaseConfig) -> dict:
 def write_case_outputs(save_dir: Path, records: list[dict], summary: dict) -> None:
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    csv_path = save_dir / "client_requests.csv"
-    fieldnames = [
-        "request_id",
-        "case_name",
-        "can_abort",
-        "worker_id",
-        "sequence",
-        "hotel_id",
-        "flight_id",
-        "requested_failure",
-        "order_key",
-        "started_at_ms",
-        "completed_at_ms",
-        "latency_ms",
-        "failed",
-        "order_committed",
-    ]
-    with csv_path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()
-        for record in sorted(records, key=lambda item: item["completed_at_ms"]):
-            writer.writerow({name: record[name] for name in fieldnames})
-
-    summary_path = save_dir / "summary.json"
+    summary_path = save_dir / f"summary_{RUN_FILE_TAG}.json"
     with summary_path.open("w", encoding="utf-8") as file:
         json.dump(summary, file, indent=2, sort_keys=True)
 
@@ -453,8 +444,12 @@ def build_suite_summary(case_summaries: list[dict]) -> dict:
 
     return {
         "run_id": case_summaries[0]["run_id"] if case_summaries else None,
+        "run_file_tag": case_summaries[0]["run_file_tag"] if case_summaries else None,
         "configured_failure_rate": (
             case_summaries[0]["configured_failure_rate"] if case_summaries else None
+        ),
+        "configured_total_throughput": (
+            case_summaries[0]["configured_total_throughput"] if case_summaries else None
         ),
         "case_summaries": case_summaries,
         "comparison": comparison,
@@ -528,7 +523,7 @@ async def main() -> None:
             case_summaries.append(summary)
 
         suite_summary = build_suite_summary(case_summaries)
-        suite_path = save_dir / "comparison.json"
+        suite_path = save_dir / f"comparison_{RUN_FILE_TAG}.json"
         with suite_path.open("w", encoding="utf-8") as file:
             json.dump(suite_summary, file, indent=2, sort_keys=True)
     finally:

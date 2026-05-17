@@ -15,7 +15,7 @@ class FuncHandler(BaseFuncHandler):
         flight_data = json.loads(get(key).decode())
         flight_data["Cap"] -= 1
         if flight_data["Cap"] < 0:
-            raise RuntimeError(f"Not enough space for flight {key}")
+            return Output(json.dumps({"success": False}))
 
         set(key, json.dumps(flight_data).encode())
     

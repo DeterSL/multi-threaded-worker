@@ -16,7 +16,7 @@ services:
       - nats
     environment:
       - NATSURL=nats://nats:4222
-      - DETERSL_THREADS=${DETERSL_THREADS:-4}
+      - DETERSL_THREADS=${DETERSL_THREADS:-8}
     ports:
       - "8080:8080"
 

@@ -35,10 +35,26 @@ MESSAGES_PER_SECOND = int(sys.argv[4])
 SECONDS = int(sys.argv[5])
 WARMUP_SECONDS = int(sys.argv[6])
 MANUAL_REVIEW_RATIO = float(sys.argv[7])
+TOTAL_THROUGHPUT = THREADS * MESSAGES_PER_SECOND
 NUM_HOTELS = 200
 NUM_FLIGHTS = 200
 SEED = 230143093
 INIT_CAPACITY = 1000
+RUN_TYPE = "with-choice" if RUN_WITH_CHOICE else "no-choice"
+
+
+def format_filename_number(value: float) -> str:
+    text = f"{value:.6f}".rstrip("0").rstrip(".")
+    if not text:
+        text = "0"
+    return text.replace(".", "_")
+
+
+RUN_FILE_TAG = (
+    f"type_{RUN_TYPE.replace('-', '_')}_"
+    f"ratio_{format_filename_number(MANUAL_REVIEW_RATIO)}_"
+    f"total_tput_{TOTAL_THROUGHPUT}"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -307,8 +323,11 @@ def percentile(values: list[float], pct: float) -> float | None:
 def build_summary(records: list[dict], args: argparse.Namespace) -> dict:
     if not records:
         return {
+            "type": RUN_TYPE,
             "with_choice": RUN_WITH_CHOICE,
+            "ratio": MANUAL_REVIEW_RATIO,
             "manual_review_ratio": MANUAL_REVIEW_RATIO,
+            "total_throughput": TOTAL_THROUGHPUT,
             "requests_total": 0,
             "requests_after_warmup": 0,
         }
@@ -319,10 +338,13 @@ def build_summary(records: list[dict], args: argparse.Namespace) -> dict:
     latencies = sorted(record["latency_ms"] for record in filtered)
 
     summary = {
+        "type": RUN_TYPE,
         "with_choice": RUN_WITH_CHOICE,
+        "ratio": MANUAL_REVIEW_RATIO,
         "manual_review_ratio": MANUAL_REVIEW_RATIO,
         "threads": THREADS,
         "messages_per_second": MESSAGES_PER_SECOND,
+        "total_throughput": TOTAL_THROUGHPUT,
         "seconds": SECONDS,
         "warmup_seconds": WARMUP_SECONDS,
         "requests_total": len(records),
@@ -359,7 +381,7 @@ def build_summary(records: list[dict], args: argparse.Namespace) -> dict:
 def write_outputs(save_dir: Path, records: list[dict], summary: dict) -> None:
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    csv_path = save_dir / "client_requests.csv"
+    csv_path = save_dir / f"client_requests_{RUN_FILE_TAG}.csv"
     fieldnames = [
         "request_id",
         "workflow_id",
@@ -377,7 +399,7 @@ def write_outputs(save_dir: Path, records: list[dict], summary: dict) -> None:
         for record in sorted(records, key=lambda item: item["completed_at_ms"]):
             writer.writerow({name: record[name] for name in fieldnames})
 
-    summary_path = save_dir / "summary.json"
+    summary_path = save_dir / f"summary_{RUN_FILE_TAG}.json"
     with summary_path.open("w", encoding="utf-8") as file:
         json.dump(summary, file, indent=2, sort_keys=True)
 
