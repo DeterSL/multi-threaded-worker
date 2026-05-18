@@ -92,9 +92,12 @@ static std::string lower(const std::string& s) {
 
                     edges.push_back(ChoiceEdge{c.Variable, op, val, std::move(child)});
                 }
-                if (!st.Default.empty()) {
-                    // Default branch ends with no additional tasks.
-                    edges.push_back(ChoiceEdge{"", "default", nullptr, nullptr});
+                if (st.Default.has_value()) {
+                    std::unique_ptr<Node> child = buildSequence(workflow_id, *st.Default, err);
+                    if (!child && err && !err->empty()) return nullptr;
+
+                    // Default is taken when no explicit choice matches.
+                    edges.push_back(ChoiceEdge{"", "default", nullptr, std::move(child)});
                 }
 
                 // Deterministic sorting like Go: by Next.ID(), then Variable, then Operand.

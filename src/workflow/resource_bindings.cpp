@@ -36,6 +36,9 @@ bool get_choice_bindings(Node* node, std::string* err){
     }
     std::unordered_set<std::string> seen;
     for(const auto& entry : node->Choices){
+        if (entry.Operand == "default") {
+            continue;
+        }
         if(seen.count(entry.Variable) > 0){
         continue;
         }

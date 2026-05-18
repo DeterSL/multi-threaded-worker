@@ -18,7 +18,7 @@ struct State {
   std::string FuncID;
   std::unordered_map<std::string, std::string> Resources;
   std::vector<Choice> Choices;
-  std::string Default;
+  std::optional<std::vector<State>> Default;
 
   const std::vector<Choice>& ChoicesClean() const {
     return Choices;
@@ -123,8 +123,8 @@ inline void to_json(json& j, const State& v) {
   if (!v.Choices.empty()) {
     j["choices"] = v.Choices;
   }
-  if (!v.Default.empty()) {
-    j["default"] = v.Default;
+  if (v.Default.has_value()) {
+    j["default"] = *v.Default;
   }
 }
 
@@ -139,8 +139,14 @@ inline void from_json(const json& j, State& v) {
   if (j.contains("choices")) {
     v.Choices = j.at("choices").get<std::vector<Choice>>();
   }
+  v.Default.reset();
   if (j.contains("default")) {
-    v.Default = j.at("default").get<std::string>();
+    const json& default_branch = j.at("default");
+    if (!default_branch.is_array()) {
+      throw nlohmann::json::type_error::create(
+          302, "type must be array for field 'default'", &default_branch);
+    }
+    v.Default = default_branch.get<std::vector<State>>();
   }
 }
 
