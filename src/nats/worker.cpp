@@ -13,9 +13,33 @@
 #include <atomic_queue/atomic_queue.h>
 #include <nlohmann/json.hpp>
 
+#ifdef __linux__
+#include <pthread.h>
+#include <sched.h>
+#endif
+
 using json = nlohmann::json;
 
 namespace detersl::nats {
+
+
+void pin_thread(int cpu)
+{
+#ifdef __linux__
+  if (cpu < 0)
+    return;
+
+
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(cpu, &cpuset);
+  if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == -1)
+  {
+    perror("pthread_setaffinity_no");
+    exit(1);
+  }
+#endif
+}
 
 struct NatsConfig {
   std::string url;
@@ -134,10 +158,10 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling,
   const int delete_after_n_wf = 1000;
 
   std::thread metrics_thread([&]() {
+    pin_thread(0);
 
     while (true) {
       detersl::status::InvocationStatus status;
-
       if (!metrics_queue.try_pop(status)) {
         std::this_thread::yield();
         continue;
@@ -156,7 +180,7 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling,
   });
 
   std::thread core_thread([&]() {
-
+    pin_thread(1);
     natsSubscription* core_sub = nullptr;
     natsConnection* nc = conn.handle();
     if (natsConnection_SubscribeSync(&core_sub, nc, core_wildcard.c_str()) != NATS_OK) {
@@ -237,6 +261,7 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling,
   });
 
   std::thread invoke_thread([&]() {
+    pin_thread(2);
     try {
       Connection invoke_conn(cfg.url, "DeterSL JS Puller", 10000, 10, 1000);
       PullSubscriber invoke_sub(invoke_conn.jetstream(), js_invoke, cfg.stream, cfg.durable + "-invoke");
@@ -291,6 +316,7 @@ void run_nats_worker(detersl::worker::Scheduling& scheduling,
     }
   });
 
+  pin_thread(3);
   int wf_count = 0;
   while (true) {
     Task task;
